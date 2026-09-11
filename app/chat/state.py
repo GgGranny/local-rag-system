@@ -1,21 +1,29 @@
-from typing import TypedDict
+from typing import Annotated
+
+from langchain_core.messages import AnyMessage
+from langgraph.graph.message import add_messages
+from typing_extensions import TypedDict
 
 
 class RAGState(TypedDict, total=False):
-    # Current user question
-    question: str
 
-    # Question rewritten using conversation context
+    # Conversation memory
+    messages: Annotated[
+        list[AnyMessage],
+        add_messages
+    ]
+
+    # Standalone question used for retrieval
     standalone_question: str
 
-    # Retrieved chunks
-    retrieved_documents: list
+    # Serializable retrieval results only
+    retrieved_documents: list[dict]
 
-    # Formatted context sent to the LLM
+    # RAG context
     context: str
 
-    # Final generated answer
+    # Final answer
     answer: str
 
-    # Sources used for the answer
-    sources: list
+    # Citation/source information
+    sources: list[dict]

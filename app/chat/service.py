@@ -3,6 +3,9 @@ from app.chat.llm import generate_answer
 
 
 def get_document_metadata(document) -> dict:
+    if isinstance(document, dict):
+        return document.get("metadata", {})
+
     if hasattr(document, "page_content"):
         return document.metadata or {}
 
@@ -21,64 +24,77 @@ def get_document_metadata(document) -> dict:
     return {}
 
 
-def build_context(results: list[dict]) -> str:
-    if not results:
-        return ""
+def get_document_content(document) -> str:
+    if isinstance(document, dict):
+        return document.get(
+            "page_content",
+            document.get("content", "")
+        )
+
+    if hasattr(document, "page_content"):
+        return document.page_content
+
+    if hasattr(document, "content"):
+        return document.content
+
+    return str(document)
+
+
+def serialize_retrieval_results(results: list[dict]) -> list[dict]:
+    serialized = []
+
+    for result in results:
+        document = result["document"]
+        serialized.append({
+            "chunk_id": result["chunk_id"],
+            "document": {
+                "page_content": get_document_content(document),
+                "metadata": get_document_metadata(document),
+            },
+            "score": result["score"],
+        })
+
+    return serialized
+
+
+def build_context(results):
 
     context_parts = []
-
-    for index, result in enumerate(results, start=1):
-
-        document = result["document"]
-
-        # -----------------------------------------
-        # Get content
-        # -----------------------------------------
-
-        if hasattr(document, "page_content"):
-            content = document.page_content
-        elif hasattr(document, "content"):
-            content = document.content
-        else:
-            content = str(document)
-
-        # -----------------------------------------
-        # Get metadata
-        # -----------------------------------------
-
-        metadata = get_document_metadata(document)
-
-        # -----------------------------------------
-        # Source information
-        # -----------------------------------------
-
+    for index, result in enumerate(
+        results,
+        start=1
+    ):
+        content = result.get(
+            "content",
+            ""
+        )
+        metadata = result.get(
+            "metadata",
+            {}
+        )
         filename = metadata.get(
             "filename",
             "Unknown"
         )
-
         page_number = metadata.get(
             "page_number"
         )
-
-        source_label = filename
-
-        if page_number:
-            source_label += (
-                f", page {page_number}"
-            )
-
-        # -----------------------------------------
-        # Build source context
-        # -----------------------------------------
-
-        context_parts.append(
-            f"[Source {index}: {source_label}]\n"
-            f"{content}\n"
+        source_label = (
+            f"{filename}"
+            if page_number is None
+            else f"{filename}, page {page_number}"
         )
 
-    return "\n".join(context_parts)
+        context_parts.append(
+            f"[Source {index}]\n"
+            f"File: {source_label}\n"
+            f"Chunk ID: {result.get('chunk_id')}\n"
+            f"Content:\n{content}"
+        )
 
+    return "\n\n".join(
+        context_parts
+    )
 def build_rag_prompt(
     question: str,
     context: str

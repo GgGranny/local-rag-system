@@ -288,3 +288,59 @@ def search_hybrid(
     # --------------------------------------------------
 
     return final_results[:k]
+
+def serialize_retrieval_results(results):
+    """
+    Convert retrieval results into plain dictionaries
+    that are safe to store in LangGraph checkpoints.
+    """
+
+    serialized = []
+    for result in results:
+        document = result["document"]
+        # LangChain Document
+        if hasattr(document, "page_content"):
+            content = document.page_content
+            metadata = getattr(
+                document,
+                "metadata",
+                {}
+            )
+
+        # SQLAlchemy DocumentChunk
+        else:
+            content = document.content
+            metadata = {
+                "filename": (
+                    document.document.filename
+                    if document.document
+                    else "Unknown"
+                ),
+                "page_number": document.page_number,
+                "extraction_method": (
+                    document.extraction_method
+                ),
+                "content_type": (
+                    document.content_type
+                ),
+            }
+
+        if not isinstance(metadata, dict):
+            metadata = {}
+
+        serialized.append({
+            "chunk_id": result["chunk_id"],
+            "content": content,
+            "metadata": metadata,
+            "score": float(
+                result.get("score", 0.0)
+            ),
+            "vector_score": float(
+                result.get("vector_score", 0.0)
+            ),
+            "bm25_score": float(
+                result.get("bm25_score", 0.0)
+            ),
+        })
+
+    return serialized
