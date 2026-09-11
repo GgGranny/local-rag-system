@@ -1,0 +1,176 @@
+{% extends "base.html" %}
+
+{% block title %}Documents{% endblock %}
+
+{% block content %}
+
+<div class="admin-dashboard">
+
+    <div class="dashboard-header">
+
+        <div>
+            <h1>Documents</h1>
+
+            <p>
+                Review documents uploaded by users.
+            </p>
+        </div>
+
+        <a href="{{ url_for('admin.dashboard') }}">
+            Dashboard
+        </a>
+
+    </div>
+
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+
+        {% if messages %}
+
+            <div class="flash-messages">
+
+                {% for category, message in messages %}
+
+                    <div class="flash {{ category }}">
+                        {{ message }}
+                    </div>
+
+                {% endfor %}
+
+            </div>
+
+        {% endif %}
+
+    {% endwith %}
+
+
+    <section class="documents-section">
+
+        <h2>All Documents</h2>
+
+
+        {% if documents %}
+
+            <div class="documents-table-wrapper">
+
+                <table class="documents-table">
+
+                    <thead>
+
+                        <tr>
+                            <th>ID</th>
+                            <th>Filename</th>
+                            <th>Type</th>
+                            <th>Uploaded By</th>
+                            <th>Status</th>
+                            <th>Uploaded</th>
+                            <th>Actions</th>
+                        </tr>
+
+                    </thead>
+
+
+                    <tbody>
+
+                        {% for document in documents %}
+
+                            <tr>
+
+                                <td>
+                                    {{ document.id }}
+                                </td>
+
+                                <td>
+                                    {{ document.filename }}
+                                </td>
+
+                                <td>
+                                    {{ document.file_type }}
+                                </td>
+
+                                <td>
+                                    {{ document.uploader.username }}
+                                </td>
+
+                                <td>
+                                    {{ document.status }}
+                                </td>
+
+                                <td>
+                                    {{
+                                        document.created_at.strftime(
+                                            "%Y-%m-%d %H:%M"
+                                        )
+                                    }}
+                                </td>
+
+                                <td>
+
+                                    {% if document.status == "PENDING" %}
+
+                                        <form
+                                            method="POST"
+                                            action="{{
+                                                url_for(
+                                                    'admin.approve_document',
+                                                    document_id=document.id
+                                                )
+                                            }}"
+                                            style="display:inline;"
+                                        >
+
+                                            <button type="submit">
+                                                Approve
+                                            </button>
+
+                                        </form>
+
+
+                                        <form
+                                            method="POST"
+                                            action="{{
+                                                url_for(
+                                                    'admin.reject_document',
+                                                    document_id=document.id
+                                                )
+                                            }}"
+                                            style="display:inline;"
+                                        >
+
+                                            <button type="submit">
+                                                Reject
+                                            </button>
+
+                                        </form>
+
+                                    {% else %}
+
+                                        <span>No action</span>
+
+                                    {% endif %}
+
+                                </td>
+
+                            </tr>
+
+                        {% endfor %}
+
+                    </tbody>
+
+                </table>
+
+            </div>
+
+        {% else %}
+
+            <p>
+                No documents have been uploaded yet.
+            </p>
+
+        {% endif %}
+
+    </section>
+
+</div>
+
+{% endblock %}

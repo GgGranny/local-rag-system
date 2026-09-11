@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+
+{% block title %}
+Chat — Local RAG
+{% endblock %}
+
+{% block content %}
+
+<div class="chat-page">
+
+    <header class="topbar">
+
+        <div>
+            <h1>RAG Assistant</h1>
+        </div>
+
+        <a
+            href="{{ url_for('auth.logout') }}"
+            class="button secondary"
+        >
+            Logout
+        </a>
+
+    </header>
+
+
+    <main class="chat-placeholder">
+
+        <div class="card">
+
+            <h2>Chat</h2>
+
+            <p>
+                RAG chat interface will be implemented
+                after the document pipeline.
+            </p>
+
+        </div>
+        <section class="upload-section">
+
+    <h2>Upload Document</h2>
+
+    <form
+        method="POST"
+        action="{{ url_for('documents.upload') }}"
+        enctype="multipart/form-data"
+    >
+
+        <input
+            type="file"
+            name="file"
+            accept=".pdf,.doc,.docx,.txt,.csv"
+            required
+        >
+
+        <button type="submit">
+            Upload
+        </button>
+
+    </form>
+
+</section>
+
+    </main>
+
+</div>
+
+{% endblock %}
