@@ -23,43 +23,6 @@ from app.retrieval.bm25_store import (
 
 
 def process_document(document_id: int):
-    """
-    Process one approved document.
-
-    Pipeline:
-
-        APPROVED
-            ↓
-        PROCESSING
-            ↓
-        Extraction
-            ↓
-        LangChain Documents
-            ↓
-        Chunking
-            ↓
-        Save chunks to SQLite
-            ↓
-        Remove old Chroma vectors
-            ↓
-        Generate embeddings
-            ↓
-        Store vectors in Chroma
-            ↓
-        COMPLETED
-            ↓
-        Rebuild BM25
-
-    If anything fails:
-
-        PROCESSING
-            ↓
-        FAILED
-    """
-
-    # ==================================================
-    # 1. Get document
-    # ==================================================
 
     document = db.session.get(
         Document,
@@ -67,28 +30,22 @@ def process_document(document_id: int):
     )
 
     if not document:
+
         raise ValueError(
             f"Document {document_id} not found."
         )
-
-    # ==================================================
-    # 2. Validate document status
-    # ==================================================
 
     if document.status not in {
         "APPROVED",
         "PROCESSING",
     }:
+
         raise ValueError(
             "Document cannot be processed "
             f"from status: {document.status}"
         )
 
     try:
-
-        # ==================================================
-        # STEP 1: Mark document as PROCESSING
-        # ==================================================
 
         document.status = "PROCESSING"
 
@@ -99,9 +56,9 @@ def process_document(document_id: int):
             f"{document.filename}"
         )
 
-        # ==================================================
-        # STEP 2: Extract document content
-        # ==================================================
+        # --------------------------------------------------
+        # EXTRACTION
+        # --------------------------------------------------
 
         print(
             f"[INGESTION] Extracting: "
@@ -111,33 +68,6 @@ def process_document(document_id: int):
         extracted_content = extract_text(
             document.file_path
         )
-
-        # ==================================================
-        # STEP 3: Normalize extracted content
-        # ==================================================
-        #
-        # PDF:
-        #
-        # [
-        #     {
-        #         "page_number": 1,
-        #         "text": "...",
-        #         "extraction_method": "pymupdf"
-        #     },
-        #     {
-        #         "page_number": 2,
-        #         "text": "...",
-        #         "extraction_method": "paddleocr"
-        #     }
-        # ]
-        #
-        # TXT / CSV / DOCX:
-        #
-        # "entire extracted text..."
-        #
-        # We convert non-PDF files into the same
-        # page-like structure.
-        # ==================================================
 
         if document.file_type == "pdf":
 
@@ -158,14 +88,15 @@ def process_document(document_id: int):
             f"{len(pages)} content units."
         )
 
-        # ==================================================
-        # STEP 4: Remove empty content
-        # ==================================================
+        # Remove empty pages/content
 
         pages = [
             page
             for page in pages
-            if page.get("text", "").strip()
+            if page.get(
+                "text",
+                ""
+            ).strip()
         ]
 
         if not pages:
@@ -175,14 +106,17 @@ def process_document(document_id: int):
                 "from the document."
             )
 
-        # ==================================================
-        # STEP 5: Convert to LangChain Documents
-        # ==================================================
+        # --------------------------------------------------
+        # CREATE PAGE DOCUMENTS
+        # --------------------------------------------------
 
         documents = create_documents(
             extracted_pages=pages,
             document_id=document.id,
             filename=document.filename,
+
+            # IMPORTANT:
+            # Store document owner in Chroma metadata.
             user_id=document.uploaded_by,
         )
 
@@ -198,9 +132,9 @@ def process_document(document_id: int):
             f"{len(documents)} page documents."
         )
 
-        # ==================================================
-        # STEP 6: Chunk the documents
-        # ==================================================
+        # --------------------------------------------------
+        # CHUNKING
+        # --------------------------------------------------
 
         chunks = chunk_documents(
             documents,
@@ -218,27 +152,9 @@ def process_document(document_id: int):
             f"{len(chunks)} chunks."
         )
 
-        # ==================================================
-        # STEP 7: Remove old database chunks
-        # ==================================================
-        #
-        # This is important when the same document
-        # is processed again.
-        #
-        # Example:
-        #
-        # Previous:
-        #     chunk_1
-        #     chunk_2
-        #     chunk_3
-        #
-        # New:
-        #     chunk_1
-        #     chunk_2
-        #
-        # Without deleting old chunks, chunk_3 would
-        # remain in SQLite.
-        # ==================================================
+        # --------------------------------------------------
+        # REMOVE OLD DATABASE CHUNKS
+        # --------------------------------------------------
 
         old_chunks = (
             DocumentChunk.query
@@ -263,9 +179,9 @@ def process_document(document_id: int):
                 f"{len(old_chunks)} old database chunks."
             )
 
-        # ==================================================
-        # STEP 8: Save new chunks to SQLite
-        # ==================================================
+        # --------------------------------------------------
+        # SAVE NEW CHUNKS TO SQLITE
+        # --------------------------------------------------
 
         for chunk in chunks:
 
@@ -303,8 +219,6 @@ def process_document(document_id: int):
                 db_chunk
             )
 
-        # Save chunks before vector indexing.
-
         db.session.commit()
 
         print(
@@ -312,27 +226,17 @@ def process_document(document_id: int):
             f"{len(chunks)} chunks to SQLite."
         )
 
-        # ==================================================
-        # STEP 9: Remove old Chroma vectors
-        # ==================================================
-        #
-        # This prevents stale vectors from an older
-        # version of the document from remaining
-        # searchable.
-        # ==================================================
-
-        print(
-            f"[INGESTION] Removing old vectors "
-            f"for document {document.id}."
-        )
+        # --------------------------------------------------
+        # REMOVE OLD CHROMA VECTORS
+        # --------------------------------------------------
 
         delete_document_chunks(
             document.id
         )
 
-        # ==================================================
-        # STEP 10: Generate embeddings + Chroma
-        # ==================================================
+        # --------------------------------------------------
+        # INDEX NEW CHUNKS IN CHROMA
+        # --------------------------------------------------
 
         print(
             f"[INGESTION] Indexing "
@@ -347,9 +251,9 @@ def process_document(document_id: int):
             "[INGESTION] Chroma indexing complete."
         )
 
-        # ==================================================
-        # STEP 11: Mark document as COMPLETED
-        # ==================================================
+        # --------------------------------------------------
+        # MARK COMPLETED
+        # --------------------------------------------------
 
         document.status = "COMPLETED"
 
@@ -360,16 +264,9 @@ def process_document(document_id: int):
             f"COMPLETED: {document.filename}"
         )
 
-        # ==================================================
-        # STEP 12: Rebuild BM25
-        # ==================================================
-        #
-        # BM25 only indexes chunks belonging to
-        # COMPLETED documents.
-        #
-        # Therefore the document must be marked
-        # COMPLETED before rebuilding BM25.
-        # ==================================================
+        # --------------------------------------------------
+        # REBUILD BM25
+        # --------------------------------------------------
 
         print(
             "[INGESTION] Rebuilding BM25 index."
@@ -381,10 +278,6 @@ def process_document(document_id: int):
             "[INGESTION] BM25 rebuild complete."
         )
 
-        # ==================================================
-        # DONE
-        # ==================================================
-
         print(
             f"[INGESTION] Completed: "
             f"{document.filename}"
@@ -393,10 +286,6 @@ def process_document(document_id: int):
         return chunks
 
     except Exception as exc:
-
-        # ==================================================
-        # ERROR HANDLING
-        # ==================================================
 
         print(
             f"[INGESTION] Failed: "
@@ -407,15 +296,7 @@ def process_document(document_id: int):
             f"[INGESTION] Error: {exc}"
         )
 
-        # --------------------------------------------------
-        # Roll back any uncommitted database changes.
-        # --------------------------------------------------
-
         db.session.rollback()
-
-        # --------------------------------------------------
-        # Retrieve document again after rollback.
-        # --------------------------------------------------
 
         failed_document = db.session.get(
             Document,
@@ -428,11 +309,14 @@ def process_document(document_id: int):
 
             db.session.commit()
 
-        # --------------------------------------------------
-        # Re-raise original exception.
-        #
-        # This allows the caller to see the actual
-        # processing error.
-        # --------------------------------------------------
-
         raise
+
+
+def remove_document_index(document_id: int) -> None:
+    """Remove all persisted retrieval data for a document and refresh BM25."""
+    delete_document_chunks(document_id)
+    DocumentChunk.query.filter_by(document_id=document_id).delete(
+        synchronize_session=False
+    )
+    db.session.commit()
+    rebuild_bm25_index()

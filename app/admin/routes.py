@@ -5,12 +5,14 @@ from flask import (
     redirect,
     url_for,
     flash,
+    session,
+    current_app,
 )
 
 from app.auth.decorators import admin_required
 from app.extensions import db
 from app.models import User, Document
-from app.ingestion.pipeline import process_document
+from app.ingestion.pipeline import process_document, remove_document_index
 
 
 admin_bp = Blueprint(
@@ -23,14 +25,19 @@ admin_bp = Blueprint(
 @admin_bp.route("")
 @admin_required
 def dashboard():
-
     users = User.query.order_by(
         User.created_at.desc()
     ).all()
 
+    document_counts = {
+        status: Document.query.filter_by(status=status).count()
+        for status in ("PENDING", "PROCESSING", "COMPLETED", "FAILED")
+    }
+
     return render_template(
         "admin/dashboard.html",
-        users=users
+        users=users,
+        document_counts=document_counts,
     )
 
 
@@ -91,6 +98,40 @@ def create_user():
     return redirect(
         url_for("admin.dashboard")
     )
+
+
+@admin_bp.route("/users/<int:user_id>/toggle", methods=["POST"])
+@admin_required
+def toggle_user(user_id):
+    user = db.session.get(User, user_id)
+    if not user:
+        flash("User not found.", "error")
+    elif user.id == session["user_id"]:
+        flash("You cannot deactivate your own account.", "error")
+    else:
+        user.is_active = not user.is_active
+        db.session.commit()
+        flash(f"User '{user.username}' updated.", "success")
+    return redirect(url_for("admin.dashboard"))
+
+
+@admin_bp.route("/users/<int:user_id>/delete", methods=["POST"])
+@admin_required
+def delete_user(user_id):
+    user = db.session.get(User, user_id)
+    if not user:
+        flash("User not found.", "error")
+    elif user.id == session["user_id"]:
+        flash("You cannot delete your own account.", "error")
+    elif user.is_admin:
+        flash("Administrator accounts cannot be deleted here.", "error")
+    elif user.documents or user.conversations:
+        flash("Users with documents or conversations cannot be deleted.", "error")
+    else:
+        db.session.delete(user)
+        db.session.commit()
+        flash(f"User '{user.username}' deleted.", "success")
+    return redirect(url_for("admin.dashboard"))
 
 
 # ---------------------------------------------------------
@@ -155,6 +196,8 @@ def approve_document(document_id):
             "success"
         )
     except Exception:
+        db.session.rollback()
+        current_app.logger.exception("[DOC] Approval processing failed")
         flash(
             f"'{document.filename}' was approved, "
             f"but processing failed.",
@@ -199,8 +242,8 @@ def reject_document(document_id):
         )
 
     document.status = "REJECTED"
-
     db.session.commit()
+    remove_document_index(document.id)
 
     flash(
         f"'{document.filename}' rejected.",
@@ -210,3 +253,27 @@ def reject_document(document_id):
     return redirect(
         url_for("admin.documents")
     )
+
+
+@admin_bp.route("/documents/<int:document_id>/reprocess", methods=["POST"])
+@admin_required
+def reprocess_document(document_id):
+    document = db.session.get(Document, document_id)
+    if not document:
+        flash("Document not found.", "error")
+        return redirect(url_for("admin.documents"))
+    if document.status not in {"FAILED", "COMPLETED"}:
+        flash("Only failed or completed documents can be reprocessed.", "error")
+        return redirect(url_for("admin.documents"))
+
+    document.status = "APPROVED"
+    db.session.commit()
+    try:
+        process_document(document.id)
+    except Exception:
+        db.session.rollback()
+        current_app.logger.exception("[DOC] Reprocessing failed")
+        flash(f"'{document.filename}' could not be processed.", "error")
+    else:
+        flash(f"'{document.filename}' was reprocessed.", "success")
+    return redirect(url_for("admin.documents"))

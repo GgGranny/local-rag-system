@@ -7,7 +7,6 @@ os.environ["PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK"] = "True"
 from pathlib import Path
 
 import fitz
-from paddleocr import PaddleOCR
 
 
 _ocr_engine = None
@@ -22,6 +21,10 @@ def get_ocr_engine():
     """
     global _ocr_engine
     if _ocr_engine is None:
+        # Importing PaddleOCR is expensive; normal application startup should
+        # not pay that cost unless a scanned PDF needs OCR.
+        from paddleocr import PaddleOCR
+
         print("[OCR] Initializing PaddleOCR...")
         _ocr_engine = PaddleOCR(
             lang="en",

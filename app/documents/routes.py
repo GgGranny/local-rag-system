@@ -9,11 +9,13 @@ from flask import (
     session,
     flash,
     current_app,
+    jsonify,
 )
 from werkzeug.utils import secure_filename
 from app.auth.decorators import login_required
 from app.extensions import db
-from app.models import Document
+from app.models import Document, User
+from app.ingestion.pipeline import process_document
 
 
 documents_bp = Blueprint(
@@ -44,36 +46,42 @@ def allowed_file(filename):
     return extension in ALLOWED_EXTENSIONS
 
 
+def wants_json_response() -> bool:
+    """Support both the chat's fetch upload and regular form submissions."""
+    return (
+        request.accept_mimetypes.best == "application/json"
+        or request.headers.get("X-Requested-With") == "XMLHttpRequest"
+    )
+
+
+def upload_error(message: str, status_code: int = 400):
+    if wants_json_response():
+        return jsonify({"error": message}), status_code
+    flash(message, "error")
+    return redirect(url_for("chat.chat"))
+
+
 @documents_bp.route("/upload", methods=["POST"])
 @login_required
 def upload():
 
     if "file" not in request.files:
-        flash(
-            "No file selected.",
-            "error"
-        )
-        return redirect(url_for("chat.chat"))
+        return upload_error("No file selected.")
 
     file = request.files["file"]
 
     if not file or not file.filename:
-        flash(
-            "No file selected.",
-            "error"
-        )
-        return redirect(url_for("chat.chat"))
+        return upload_error("No file selected.")
 
     if not allowed_file(file.filename):
-        flash(
-            "Unsupported file type.",
-            "error"
-        )
-        return redirect(url_for("chat.chat"))
+        return upload_error("Unsupported file type.")
 
     original_filename = secure_filename(
         file.filename
     )
+
+    if not original_filename:
+        return upload_error("The filename is invalid.")
 
     extension = Path(
         original_filename
@@ -90,26 +98,88 @@ def upload():
 
     file_path = upload_dir / stored_filename
 
-    file.save(file_path)
+    try:
+        file.save(file_path)
+    except OSError:
+        current_app.logger.exception("[DOC] Failed to save upload")
+        return upload_error("The file could not be saved.", 500)
+
+    user = db.session.get(User, session["user_id"])
+    if not user:
+        return upload_error("User not found.", 401)
+
+    is_admin = user.role == "ADMIN"
 
     document = Document(
         filename=original_filename,
         stored_filename=stored_filename,
         file_path=str(file_path),
         file_type=extension.lstrip("."),
-        status="PENDING",
-        uploaded_by=session["user_id"],
+        status="APPROVED" if is_admin else "PENDING",
+        uploaded_by=user.id,
     )
 
     db.session.add(document)
     db.session.commit()
 
-    flash(
-        "Document uploaded and is waiting for admin approval.",
-        "success"
-    )
+    if is_admin:
+        try:
+            process_document(document.id)
+        except Exception:
+            current_app.logger.exception(
+                "[DOC] Admin upload processing failed for document %s",
+                document.id,
+            )
+            message = "Document uploaded, but processing failed. An admin can retry it."
+            final_status = "FAILED"
+        else:
+            message = "Document uploaded and processed successfully."
+            final_status = "COMPLETED"
+    else:
+        message = "Document uploaded and is waiting for admin approval."
+        final_status = "PENDING"
 
+    payload = {
+        "message": message,
+        "document": {
+            "id": document.id,
+            "filename": document.filename,
+            "status": final_status,
+        },
+    }
+    if wants_json_response():
+        return jsonify(payload), 201
+
+    flash(message, "success" if final_status != "FAILED" else "error")
     return redirect(url_for("chat.chat"))
+
+
+@documents_bp.route("/chunks/<string:chunk_id>", methods=["GET"])
+@login_required
+def get_chunk(chunk_id):
+    """Return a cited source only when the current user owns its document."""
+    from app.models import DocumentChunk
+
+    chunk = DocumentChunk.query.filter_by(chunk_id=chunk_id).first()
+    if not chunk:
+        return jsonify({"error": "Source not found."}), 404
+
+    user = db.session.get(User, session["user_id"])
+    if not user or (not user.is_admin and chunk.document.uploaded_by != user.id):
+        return jsonify({"error": "Source not found."}), 404
+
+    if chunk.document.status != "COMPLETED":
+        return jsonify({"error": "Source not found."}), 404
+
+    return jsonify({
+        "chunk_id": chunk.chunk_id,
+        "document_id": chunk.document_id,
+        "filename": chunk.document.filename,
+        "page_number": chunk.page_number,
+        "content": chunk.content,
+        "extraction_method": chunk.extraction_method,
+        "content_type": chunk.content_type,
+    })
 
 
 @documents_bp.route("/mine", methods=["GET"])

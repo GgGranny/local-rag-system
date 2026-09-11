@@ -3,24 +3,36 @@ from langgraph.graph import (
     START,
     END,
 )
+
 from langchain_core.messages import (
     HumanMessage,
     AIMessage,
 )
+
 from app.chat.state import RAGState
-from app.chat.checkpointer import get_checkpointer
+
+from app.chat.checkpointer import (
+    get_checkpointer,
+)
+
 from app.retrieval.hybrid import (
     search_hybrid,
     serialize_retrieval_results,
 )
+
 from app.chat.service import (
     build_context,
     build_rag_prompt,
-    get_document_metadata,
-    serialize_retrieval_results,
 )
-from app.chat.llm import generate_answer
 
+from app.chat.llm import (
+    generate_answer,
+)
+
+
+# ======================================================
+# QUERY REWRITING
+# ======================================================
 
 def rewrite_query(
     state: RAGState
@@ -32,33 +44,57 @@ def rewrite_query(
     )
 
     if not messages:
+
         raise ValueError(
             "No conversation messages found."
         )
 
-    current_question = messages[-1].content.strip()
+    current_question = (
+        messages[-1]
+        .content
+        .strip()
+    )
 
     if not current_question:
+
         raise ValueError(
             "Question cannot be empty."
         )
-    previous_messages = messages[:-1]
 
-    # No previous conversation.
+    previous_messages = (
+        messages[:-1]
+    )
+
+    # --------------------------------------------------
+    # FIRST QUESTION
+    # --------------------------------------------------
+
     if not previous_messages:
+
         print(
             f"[GRAPH] First question: "
             f"{current_question}"
         )
 
         return {
-            "standalone_question": current_question
+            "standalone_question":
+                current_question
         }
+
+    # --------------------------------------------------
+    # BUILD HISTORY
+    # --------------------------------------------------
+
     conversation = []
+
     for message in previous_messages:
+
         role = (
             "User"
-            if isinstance(message, HumanMessage)
+            if isinstance(
+                message,
+                HumanMessage
+            )
             else "Assistant"
         )
 
@@ -70,48 +106,61 @@ def rewrite_query(
         conversation
     )
 
+    # --------------------------------------------------
+    # REWRITE PROMPT
+    # --------------------------------------------------
+
     prompt = f"""
-    You are a question rewriting component
-    for a document-based RAG system.
+You are a question rewriting component
+for a document-based RAG system.
 
-    Your job is to rewrite the user's latest
-    question into a standalone question that
-    can be searched against documents.
+Your job is to rewrite the user's latest
+question into a standalone question that
+can be searched against documents.
 
-    Rules:
+Rules:
 
-    1. Use the conversation history to understand
-    references such as "it", "they", "this",
-    "that", or "the previous one".
-    2. Do not answer the question.
-    3. Do not add information that is not present
-    in the conversation.
-    4. If the latest question is already standalone,
-    return it unchanged.
-    5. Return ONLY the rewritten question.
-    6. Do not include explanations.
-    7. Do not include quotation marks.
+1. Use the conversation history to understand
+   references such as "it", "they", "this",
+   "that", or "the previous one".
 
-    Conversation history:
-    --------------------
+2. Do not answer the question.
 
-    {conversation_text}
+3. Do not add information that is not present
+   in the conversation.
 
-    --------------------
+4. If the latest question is already standalone,
+   return it unchanged.
 
-    Latest user question:
-    {current_question}
+5. Return ONLY the rewritten question.
 
-    Standalone retrieval question:
-    """
+6. Do not include explanations.
+
+7. Do not include quotation marks.
+
+Conversation history:
+--------------------
+
+{conversation_text}
+
+--------------------
+
+Latest user question:
+{current_question}
+
+Standalone retrieval question:
+"""
 
     print(
         "[GRAPH] Rewriting follow-up question..."
     )
 
-    standalone_question = generate_answer(
-        prompt
-    ).strip()
+    standalone_question = (
+        generate_answer(
+            prompt
+        )
+        .strip()
+    )
 
     print(
         f"[GRAPH] Standalone question: "
@@ -124,6 +173,10 @@ def rewrite_query(
     }
 
 
+# ======================================================
+# RETRIEVAL
+# ======================================================
+
 def retrieve(
     state: RAGState
 ) -> RAGState:
@@ -132,14 +185,35 @@ def retrieve(
         "standalone_question"
     ]
 
+    user_id = state.get(
+        "user_id"
+    )
+
+    is_admin = state.get(
+        "is_admin",
+        False
+    )
+
     print(
         f"[GRAPH] Retrieving: "
         f"{question}"
     )
 
+    print(
+        f"[GRAPH] User ID: "
+        f"{user_id}"
+    )
+
+    print(
+        f"[GRAPH] Admin: "
+        f"{is_admin}"
+    )
+
     results = search_hybrid(
         query=question,
-        k=5
+        k=5,
+        user_id=user_id,
+        is_admin=is_admin,
     )
 
     print(
@@ -157,6 +231,11 @@ def retrieve(
         "retrieved_documents":
             serialized_results
     }
+
+
+# ======================================================
+# BUILD CONTEXT
+# ======================================================
 
 def build_context_node(
     state: RAGState
@@ -181,6 +260,10 @@ def build_context_node(
     }
 
 
+# ======================================================
+# GENERATE ANSWER
+# ======================================================
+
 def generate_answer_node(
     state: RAGState
 ) -> RAGState:
@@ -194,6 +277,10 @@ def generate_answer_node(
         ""
     )
 
+    # --------------------------------------------------
+    # NO CONTEXT
+    # --------------------------------------------------
+
     if not context:
 
         answer = (
@@ -204,13 +291,19 @@ def generate_answer_node(
 
         return {
             "answer": answer,
+
             "sources": [],
+
             "messages": [
                 AIMessage(
                     content=answer
                 )
             ],
         }
+
+    # --------------------------------------------------
+    # GENERATE
+    # --------------------------------------------------
 
     prompt = build_rag_prompt(
         question=question,
@@ -224,6 +317,10 @@ def generate_answer_node(
     answer = generate_answer(
         prompt
     )
+
+    # --------------------------------------------------
+    # SOURCES
+    # --------------------------------------------------
 
     results = state.get(
         "retrieved_documents",
@@ -243,25 +340,36 @@ def generate_answer_node(
         )
 
         sources.append({
-            "citation": f"[{index}]",
+            "citation":
+                f"[{index}]",
 
-            "chunk_id": result.get(
-                "chunk_id"
-            ),
+            "chunk_id":
+                result.get(
+                    "chunk_id"
+                ),
 
-            "filename": metadata.get(
-                "filename",
-                "Unknown"
-            ),
+            "filename":
+                metadata.get(
+                    "filename",
+                    "Unknown"
+                ),
 
-            "page_number": metadata.get(
-                "page_number"
-            ),
+            "page_number":
+                metadata.get(
+                    "page_number"
+                ),
 
-            "score": result.get(
-                "score",
-                0.0
-            ),
+            "score":
+                result.get(
+                    "score",
+                    0.0
+                ),
+
+            "content": result.get("content", ""),
+
+            "extraction_method": metadata.get("extraction_method"),
+
+            "document_id": metadata.get("document_id"),
         })
 
     return {
@@ -276,6 +384,10 @@ def generate_answer_node(
         ],
     }
 
+
+# ======================================================
+# BUILD GRAPH
+# ======================================================
 
 def build_graph():
 

@@ -8,81 +8,130 @@ def create_documents(
     filename,
     user_id,
 ):
+    """
+    Convert extracted pages into LangChain Documents.
+
+    Each page keeps metadata that will later be used for:
+    - citations
+    - source display
+    - ownership filtering
+    - retrieval
+    """
+
     documents = []
+
     for page in extracted_pages:
+
+        text = page.get(
+            "text",
+            ""
+        ).strip()
+
+        if not text:
+            continue
+
         metadata = {
             "document_id": document_id,
+
             "filename": filename,
-            "page_number": page["page_number"],
-            "extraction_method": page.get(
-                "extraction_method"
+
+            "page_number": page.get(
+                "page_number"
             ),
+
+            "extraction_method": page.get(
+                "extraction_method",
+                "native"
+            ),
+
             "content_type": "page",
+
             "status": "COMPLETED",
+
+            # Important for user-isolated RAG
             "user_id": user_id,
         }
+
         document = Document(
-            page_content=page["text"],
+            page_content=text,
             metadata=metadata,
         )
+
         documents.append(document)
+
     return documents
 
+
 def chunk_documents(
-    documents: list[Document],
-    document_id: int,
-    chunk_size: int = 1000,
-    chunk_overlap: int = 150
-) -> list[Document]:
+    documents,
+    document_id,
+):
+    """
+    Split page documents into chunks.
+
+    Stable chunk IDs are generated so that
+    citations can later point back to the
+    exact chunk.
+    """
 
     splitter = CharacterTextSplitter(
         separator="\n",
-        chunk_size=chunk_size,
-        chunk_overlap=chunk_overlap,
+        chunk_size=1000,
+        chunk_overlap=150,
         length_function=len,
     )
 
-    chunks = splitter.split_documents(
-        documents
-    )
+    chunks = []
 
-    # Keep track of chunks independently
-    # for each page.
-    page_chunk_counts = {}
+    for document in documents:
 
-    for chunk in chunks:
+        split_documents = splitter.split_documents(
+            [document]
+        )
 
-        page_number = chunk.metadata.get(
+        page_number = document.metadata.get(
             "page_number"
         )
 
-        page_chunk_counts.setdefault(
-            page_number,
-            0
-        )
+        for chunk_index, chunk in enumerate(
+            split_documents
+        ):
 
-        page_chunk_counts[
-            page_number
-        ] += 1
+            chunk_id = (
+                f"doc_{document_id}"
+                f"_page_{page_number}"
+                f"_chunk_{chunk_index}"
+            )
 
-        chunk_index = page_chunk_counts[
-            page_number
-        ]
+            chunk.metadata.update({
+                "document_id": document_id,
 
-        chunk.metadata[
-            "chunk_index"
-        ] = chunk_index
+                "filename": document.metadata.get(
+                    "filename",
+                    "Unknown"
+                ),
 
-        chunk.metadata[
-            "chunk_id"
-        ] = (
-            f"doc_{document_id}"
-            f"_page_{page_number}"
-            f"_chunk_{chunk_index}"
-        )
+                "page_number": page_number,
 
-        chunk.metadata[
-            "content_type"
-        ] = "chunk"
+                "extraction_method":
+                    document.metadata.get(
+                        "extraction_method"
+                    ),
+
+                "content_type": "chunk",
+
+                "status": "COMPLETED",
+
+                # Preserve ownership metadata
+                "user_id": document.metadata.get(
+                    "user_id"
+                ),
+
+                "chunk_id": chunk_id,
+
+                "chunk_index": chunk_index,
+            })
+
+            chunks.append(chunk)
 
     return chunks

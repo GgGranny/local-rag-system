@@ -7,340 +7,420 @@ from app.retrieval.bm25_store import (
 )
 
 
-def normalize_scores(
-    results: list[dict]
-) -> list[dict]:
-    """
-    Normalize scores to a 0-1 range using min-max
-    normalization.
-
-    Input:
-        [
-            {"chunk": ..., "score": 10.5},
-            {"chunk": ..., "score": 5.2},
-        ]
-
-    Output:
-        [
-            {"chunk": ..., "score": 1.0},
-            {"chunk": ..., "score": 0.0},
-        ]
-    """
+def normalize_scores(results):
 
     if not results:
-        return []
+        return results
 
     scores = [
-        result["score"]
+        float(
+            result.get(
+                "score",
+                0.0
+            )
+        )
         for result in results
     ]
 
     minimum = min(scores)
     maximum = max(scores)
 
-    # If every result has the same score,
-    # give them equal normalized scores.
     if maximum == minimum:
 
         for result in results:
-            result["normalized_score"] = 1.0
+
+            result["normalized_score"] = (
+                1.0
+                if maximum > 0
+                else 0.0
+            )
 
         return results
 
     for result in results:
 
+        score = float(
+            result.get(
+                "score",
+                0.0
+            )
+        )
+
         result["normalized_score"] = (
-            result["score"] - minimum
-        ) / (
-            maximum - minimum
+            (score - minimum)
+            / (maximum - minimum)
         )
 
     return results
 
 
 def search_vector(
-    query: str,
-    k: int = 5
-) -> list[dict]:
+    query,
+    k=5,
+    user_id=None,
+    is_admin=False,
+):
+    """
+    Vector retrieval with ownership filtering.
+
+    Admin:
+        status == COMPLETED
+
+    Normal user:
+        status == COMPLETED
+        AND user_id == current user
+    """
 
     vector_store = get_vector_store()
+
+    # --------------------------------------------------
+    # CHROMA FILTER
+    # --------------------------------------------------
+
+    if is_admin:
+
+        search_filter = {
+            "status": "COMPLETED"
+        }
+
+    else:
+
+        if user_id is None:
+            return []
+
+        search_filter = {
+            "$and": [
+                {
+                    "status": "COMPLETED"
+                },
+                {
+                    "user_id": user_id
+                }
+            ]
+        }
 
     results = (
         vector_store
         .similarity_search_with_score(
             query,
             k=k,
-            filter={
-                "status": "COMPLETED"
-            }
+            filter=search_filter,
         )
     )
 
     formatted_results = []
 
-    for document, score in results:
+    for document, distance in results:
 
-        chunk_id = document.metadata.get(
+        metadata = (
+            document.metadata
+            if isinstance(
+                document.metadata,
+                dict
+            )
+            else {}
+        )
+
+        chunk_id = metadata.get(
             "chunk_id"
         )
 
         if not chunk_id:
             continue
 
+        distance = max(
+            float(distance),
+            0.0
+        )
+
+        similarity = (
+            1.0 / (1.0 + distance)
+        )
+
         formatted_results.append({
             "chunk_id": chunk_id,
+
             "document": document,
-            "score": float(score),
+
+            "score": similarity,
         })
 
     return formatted_results
 
+
 def search_hybrid(
-    query: str,
-    k: int = 5,
-    vector_weight: float = 0.7,
-    bm25_weight: float = 0.3,
-) -> list[dict]:
+    query,
+    k=5,
+    user_id=None,
+    is_admin=False,
+    vector_weight=0.7,
+    bm25_weight=0.3,
+):
     """
-    Perform hybrid retrieval using:
+    Hybrid vector + BM25 retrieval.
 
-        Chroma semantic search
-        +
-        BM25 keyword search
-
-    The final score is:
-
-        final_score =
-            vector_score * vector_weight
-            +
-            bm25_score * bm25_weight
-
-    Results from both systems are merged using
-    the stable chunk_id.
+    Ownership filtering is applied to both
+    retrieval systems before merging.
     """
-
-    if not query or not query.strip():
-
-        return []
-
-    if vector_weight < 0 or bm25_weight < 0:
-
-        raise ValueError(
-            "Retrieval weights cannot be negative."
-        )
-
-    total_weight = (
-        vector_weight +
-        bm25_weight
-    )
-
-    if total_weight <= 0:
-
-        raise ValueError(
-            "At least one retrieval weight "
-            "must be greater than zero."
-        )
-
-    # Normalize weights so they always sum to 1.
-    vector_weight = (
-        vector_weight /
-        total_weight
-    )
-
-    bm25_weight = (
-        bm25_weight /
-        total_weight
-    )
-
-    # --------------------------------------------------
-    # 1. Vector search
-    # --------------------------------------------------
 
     vector_results = search_vector(
         query=query,
-        k=k
+        k=k,
+        user_id=user_id,
+        is_admin=is_admin,
     )
 
-    # Chroma returns distance values.
-    #
-    # Lower distance = more similar.
-    #
-    # We therefore convert distance into a
-    # similarity-like score.
-    #
-    # similarity = 1 / (1 + distance)
-    #
-    # Higher = better.
+    bm25_results = search_bm25(
+        query=query,
+        k=k,
+        user_id=user_id,
+        is_admin=is_admin,
+    )
+
     # --------------------------------------------------
-
-    for result in vector_results:
-
-        distance = result["score"]
-
-        result["score"] = (
-            1.0 /
-            (1.0 + max(distance, 0.0))
-        )
+    # NORMALIZE
+    # --------------------------------------------------
 
     vector_results = normalize_scores(
         vector_results
     )
-
-    # --------------------------------------------------
-    # 2. BM25 search
-    # --------------------------------------------------
-
-    bm25_results = search_bm25(
-        query=query,
-        k=k
-    )
-
-    bm25_results = [
-        {
-            "chunk_id": result["chunk"].chunk_id,
-            "document": result["chunk"],
-            "score": result["score"],
-        }
-        for result in bm25_results
-    ]
 
     bm25_results = normalize_scores(
         bm25_results
     )
 
     # --------------------------------------------------
-    # 3. Merge results
+    # MERGE
     # --------------------------------------------------
 
     merged = {}
 
     # Vector results
+
     for result in vector_results:
 
-        chunk_id = result["chunk_id"]
+        chunk_id = result[
+            "chunk_id"
+        ]
 
         merged[chunk_id] = {
             "chunk_id": chunk_id,
-            "document": result["document"],
-            "vector_score": result[
-                "normalized_score"
+
+            "document": result[
+                "document"
             ],
+
+            "vector_score":
+                result.get(
+                    "normalized_score",
+                    0.0
+                ),
+
             "bm25_score": 0.0,
         }
 
     # BM25 results
+
     for result in bm25_results:
 
-        chunk_id = result["chunk_id"]
+        chunk_id = result[
+            "chunk_id"
+        ]
 
         if chunk_id not in merged:
 
             merged[chunk_id] = {
                 "chunk_id": chunk_id,
-                "document": result["document"],
-                "vector_score": 0.0,
-                "bm25_score": result[
-                    "normalized_score"
+
+                "document": result[
+                    "document"
                 ],
+
+                "vector_score": 0.0,
+
+                "bm25_score":
+                    result.get(
+                        "normalized_score",
+                        0.0
+                    ),
             }
 
         else:
 
             merged[chunk_id][
                 "bm25_score"
-            ] = result[
-                "normalized_score"
-            ]
+            ] = result.get(
+                "normalized_score",
+                0.0
+            )
 
     # --------------------------------------------------
-    # 4. Calculate final hybrid score
+    # HYBRID SCORE
     # --------------------------------------------------
 
     final_results = []
 
     for result in merged.values():
 
+        vector_score = float(
+            result.get(
+                "vector_score",
+                0.0
+            )
+        )
+
+        bm25_score = float(
+            result.get(
+                "bm25_score",
+                0.0
+            )
+        )
+
         final_score = (
-            result["vector_score"]
-            * vector_weight
+            vector_score * vector_weight
             +
-            result["bm25_score"]
-            * bm25_weight
+            bm25_score * bm25_weight
         )
 
-        result["score"] = final_score
+        final_results.append({
+            "chunk_id":
+                result["chunk_id"],
 
-        final_results.append(
-            result
-        )
+            "document":
+                result["document"],
 
-    # --------------------------------------------------
-    # 5. Sort by final score
-    # --------------------------------------------------
+            "score":
+                final_score,
+
+            "vector_score":
+                vector_score,
+
+            "bm25_score":
+                bm25_score,
+        })
 
     final_results.sort(
-        key=lambda result: result["score"],
+        key=lambda result:
+            result["score"],
         reverse=True
     )
 
-    # --------------------------------------------------
-    # 6. Return top K
-    # --------------------------------------------------
-
     return final_results[:k]
 
-def serialize_retrieval_results(results):
+
+def serialize_retrieval_results(
+    results
+):
     """
-    Convert retrieval results into plain dictionaries
-    that are safe to store in LangGraph checkpoints.
+    Convert retrieval results into plain
+    dictionaries safe for LangGraph checkpoints.
     """
 
     serialized = []
+
     for result in results:
-        document = result["document"]
+
+        document = result[
+            "document"
+        ]
+
+        # --------------------------------------------------
         # LangChain Document
-        if hasattr(document, "page_content"):
-            content = document.page_content
+        # --------------------------------------------------
+
+        if hasattr(
+            document,
+            "page_content"
+        ):
+
+            content = (
+                document.page_content
+            )
+
             metadata = getattr(
                 document,
                 "metadata",
                 {}
             )
 
+        # --------------------------------------------------
         # SQLAlchemy DocumentChunk
+        # --------------------------------------------------
+
         else:
+
             content = document.content
+
             metadata = {
                 "filename": (
                     document.document.filename
                     if document.document
                     else "Unknown"
                 ),
-                "page_number": document.page_number,
-                "extraction_method": (
-                    document.extraction_method
-                ),
-                "content_type": (
-                    document.content_type
-                ),
+
+                "page_number":
+                    document.page_number,
+
+                "extraction_method":
+                    document.extraction_method,
+
+                "content_type":
+                    document.content_type,
+
+                "document_id":
+                    document.document_id,
+
+                "user_id":
+                    document.document.uploaded_by
+                    if document.document
+                    else None,
+
+                "status":
+                    document.document.status
+                    if document.document
+                    else None,
             }
 
-        if not isinstance(metadata, dict):
+        if not isinstance(
+            metadata,
+            dict
+        ):
+
             metadata = {}
 
         serialized.append({
-            "chunk_id": result["chunk_id"],
-            "content": content,
-            "metadata": metadata,
-            "score": float(
-                result.get("score", 0.0)
-            ),
-            "vector_score": float(
-                result.get("vector_score", 0.0)
-            ),
-            "bm25_score": float(
-                result.get("bm25_score", 0.0)
-            ),
+            "chunk_id":
+                result["chunk_id"],
+
+            "content":
+                content,
+
+            "metadata":
+                metadata,
+
+            "score":
+                float(
+                    result.get(
+                        "score",
+                        0.0
+                    )
+                ),
+
+            "vector_score":
+                float(
+                    result.get(
+                        "vector_score",
+                        0.0
+                    )
+                ),
+
+            "bm25_score":
+                float(
+                    result.get(
+                        "bm25_score",
+                        0.0
+                    )
+                ),
         })
 
     return serialized

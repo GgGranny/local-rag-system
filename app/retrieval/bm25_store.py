@@ -1,34 +1,18 @@
 import re
+
 from rank_bm25 import BM25Okapi
-from app.models import DocumentChunk
 
+from app.models import (
+    Document,
+    DocumentChunk,
+)
 
-# --------------------------------------------------
-# In-memory BM25 index
-# --------------------------------------------------
-#
-# BM25 does not need to be recreated for every query.
-# We build the index and keep it in memory.
-#
-# Later we can add persistent/cached indexing if needed.
-# --------------------------------------------------
 
 _bm25 = None
 _chunks = []
 
 
-def tokenize(text: str) -> list[str]:
-    """
-    Convert text into tokens for BM25.
-
-    Example:
-
-        "Python is a programming language."
-
-    becomes:
-
-        ["python", "is", "a", "programming", "language"]
-    """
+def tokenize(text):
 
     return re.findall(
         r"\b\w+\b",
@@ -37,43 +21,43 @@ def tokenize(text: str) -> list[str]:
 
 
 def build_bm25_index():
-    """
-    Build the BM25 index from all document chunks
-    stored in SQLite.
-
-    Only COMPLETED documents are indexed.
-    """
 
     global _bm25
     global _chunks
 
-    chunks = (
-        DocumentChunk.query
-        .join(DocumentChunk.document)
-        .filter_by(status="COMPLETED")
-        .all()
+    print(
+        "[BM25] Building index..."
     )
+
+    query = (
+        DocumentChunk.query
+        .join(Document)
+        .filter(
+            Document.status == "COMPLETED"
+        )
+    )
+
+    chunks = query.all()
+
+    _chunks = chunks
 
     if not chunks:
 
         _bm25 = None
-        _chunks = []
 
         print(
-            "[BM25] No completed document chunks found."
+            "[BM25] No completed chunks found."
         )
 
         return
 
-    _chunks = chunks
-
-    tokenized_corpus = [
+    corpus = [
         tokenize(chunk.content)
         for chunk in chunks
     ]
 
     _bm25 = BM25Okapi(
-        tokenized_corpus
+        corpus
     )
 
     print(
@@ -83,11 +67,6 @@ def build_bm25_index():
 
 
 def get_bm25_index():
-    """
-    Return the current BM25 index.
-
-    Build it automatically if it doesn't exist.
-    """
 
     global _bm25
 
@@ -99,39 +78,38 @@ def get_bm25_index():
 
 
 def search_bm25(
-    query: str,
-    k: int = 5
+    query,
+    k=5,
+    user_id=None,
+    is_admin=False,
 ):
     """
-    Search the BM25 index.
+    Search BM25 while enforcing document ownership.
 
-    Returns:
+    Normal user:
+        COMPLETED + uploaded_by == user_id
 
-        [
-            {
-                "chunk": DocumentChunk,
-                "score": float
-            }
-        ]
+    Admin:
+        COMPLETED documents from all users.
     """
+
+    global _chunks
 
     bm25 = get_bm25_index()
 
     if bm25 is None:
+
         return []
 
     query_tokens = tokenize(
         query
     )
 
-    if not query_tokens:
-        return []
-
     scores = bm25.get_scores(
         query_tokens
     )
 
-    ranked_indexes = sorted(
+    ranked_indices = sorted(
         range(len(scores)),
         key=lambda index: scores[index],
         reverse=True
@@ -139,18 +117,50 @@ def search_bm25(
 
     results = []
 
-    for index in ranked_indexes[:k]:
+    for index in ranked_indices:
+
+        if len(results) >= k:
+            break
 
         score = float(
             scores[index]
         )
 
-        # Ignore zero-score results.
         if score <= 0:
             continue
 
+        chunk = _chunks[index]
+
+        # ----------------------------------------------
+        # OWNERSHIP CHECK
+        # ----------------------------------------------
+
+        document = chunk.document
+
+        if not document:
+            continue
+
+        if document.status != "COMPLETED":
+            continue
+
+        if not is_admin:
+
+            if user_id is None:
+                continue
+
+            if document.uploaded_by != user_id:
+                continue
+
+        # ----------------------------------------------
+        # NORMALIZED RESULT
+        # ----------------------------------------------
+
         results.append({
-            "chunk": _chunks[index],
+            "chunk_id": chunk.chunk_id,
+
+            # Keep SQLAlchemy object internal.
+            "document": chunk,
+
             "score": score,
         })
 
@@ -158,14 +168,11 @@ def search_bm25(
 
 
 def rebuild_bm25_index():
-    """
-    Force a complete BM25 index rebuild.
 
-    Useful after:
-        - document approval
-        - document deletion
-        - document re-processing
-        - document rejection
-    """
+    global _bm25
+    global _chunks
+
+    _bm25 = None
+    _chunks = []
 
     build_bm25_index()

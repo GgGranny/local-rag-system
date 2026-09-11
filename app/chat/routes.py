@@ -10,7 +10,7 @@ import uuid
 from langchain_core.messages import HumanMessage
 from app.auth.decorators import login_required
 from app.extensions import db
-from app.models import Conversation
+from app.models import (Conversation, User)
 from app.chat.graph import build_graph
 from flask import render_template
 
@@ -97,7 +97,10 @@ def list_conversations():
     ])
 
 
-@chat_bp.route("/ask", methods=["POST"])
+@chat_bp.route(
+    "/ask",
+    methods=["POST"]
+)
 @login_required
 def ask():
 
@@ -106,8 +109,10 @@ def ask():
     )
 
     if not data:
+
         return jsonify({
-            "error": "Request body is required."
+            "error":
+                "Request body is required."
         }), 400
 
     question = data.get(
@@ -116,8 +121,10 @@ def ask():
     ).strip()
 
     if not question:
+
         return jsonify({
-            "error": "Question cannot be empty."
+            "error":
+                "Question cannot be empty."
         }), 400
 
     thread_id = data.get(
@@ -125,15 +132,35 @@ def ask():
     )
 
     if not thread_id:
+
         return jsonify({
-            "error": "thread_id is required."
+            "error":
+                "thread_id is required."
         }), 400
 
-    # -----------------------------
-    # Verify conversation ownership
-    # -----------------------------
+    # --------------------------------------------------
+    # AUTHENTICATED USER
+    # --------------------------------------------------
 
-    user_id = session["user_id"]
+    user_id = session[
+        "user_id"
+    ]
+
+    user = db.session.get(
+        User,
+        user_id
+    )
+
+    if not user:
+
+        return jsonify({
+            "error":
+                "User not found."
+        }), 401
+
+    # --------------------------------------------------
+    # CONVERSATION OWNERSHIP
+    # --------------------------------------------------
 
     conversation = (
         Conversation.query
@@ -145,31 +172,26 @@ def ask():
     )
 
     if not conversation:
+
         return jsonify({
-            "error": "Conversation not found."
+            "error":
+                "Conversation not found."
         }), 404
 
-    # -----------------------------
-    # Get LangGraph
-    # -----------------------------
+    # --------------------------------------------------
+    # GRAPH
+    # --------------------------------------------------
 
     graph = get_graph()
 
-    # -----------------------------
-    # LangGraph checkpoint config
-    # -----------------------------
-
     config = {
         "configurable": {
-            "thread_id": conversation.thread_id
+            "thread_id":
+                conversation.thread_id
         }
     }
 
     try:
-
-        # -----------------------------
-        # Run RAG graph
-        # -----------------------------
 
         result = graph.invoke(
             {
@@ -177,14 +199,18 @@ def ask():
                     HumanMessage(
                         content=question
                     )
-                ]
+                ],
+
+                # IMPORTANT:
+                # Retrieval uses these values
+                # to enforce ownership.
+                "user_id": user.id,
+
+                "is_admin":
+                    user.role == "ADMIN",
             },
             config=config
         )
-
-        # -----------------------------
-        # Update conversation timestamp
-        # -----------------------------
 
         conversation.updated_at = (
             datetime.utcnow()
@@ -192,24 +218,22 @@ def ask():
 
         db.session.commit()
 
-        # -----------------------------
-        # Return response
-        # -----------------------------
-
         return jsonify({
-            "answer": result.get(
-                "answer",
-                ""
-            ),
 
-            "sources": result.get(
-                "sources",
-                []
-            ),
+            "answer":
+                result.get(
+                    "answer",
+                    ""
+                ),
 
-            "thread_id": (
-                conversation.thread_id
-            ),
+            "sources":
+                result.get(
+                    "sources",
+                    []
+                ),
+
+            "thread_id":
+                conversation.thread_id,
 
             "standalone_question":
                 result.get(
@@ -227,12 +251,10 @@ def ask():
         )
 
         return jsonify({
-            "error": (
+            "error":
                 "Failed to generate "
                 "an answer."
-            )
         }), 500
-
 
 @chat_bp.route(
     "/conversations/<string:thread_id>",

@@ -143,6 +143,16 @@
 
                                         </form>
 
+                                    {% elif document.status in ["FAILED", "COMPLETED"] %}
+
+                                        <form
+                                            method="POST"
+                                            action="{{ url_for('admin.reprocess_document', document_id=document.id) }}"
+                                            style="display:inline;"
+                                        >
+                                            <button type="submit">Reprocess</button>
+                                        </form>
+
                                     {% else %}
 
                                         <span>No action</span>
