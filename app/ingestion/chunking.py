@@ -3,34 +3,30 @@ from langchain_text_splitters import CharacterTextSplitter
 
 
 def create_documents(
-    extracted_pages: list[dict],
-    document_id: int,
-    filename: str
-) -> list[Document]:
-
+    extracted_pages,
+    document_id,
+    filename,
+    user_id,
+):
     documents = []
     for page in extracted_pages:
-        text = page["text"].strip()
-        if not text:
-            continue
+        metadata = {
+            "document_id": document_id,
+            "filename": filename,
+            "page_number": page["page_number"],
+            "extraction_method": page.get(
+                "extraction_method"
+            ),
+            "content_type": "page",
+            "status": "COMPLETED",
+            "user_id": user_id,
+        }
         document = Document(
-            page_content=text,
-            metadata={
-                "document_id": document_id,
-                "filename": filename,
-                "page_number": page["page_number"],
-                "extraction_method": page[
-                    "extraction_method"
-                ],
-                "content_type": "page",
-                "status": "COMPLETED",
-            }
+            page_content=page["text"],
+            metadata=metadata,
         )
-
         documents.append(document)
-
     return documents
-
 
 def chunk_documents(
     documents: list[Document],

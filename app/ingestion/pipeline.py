@@ -183,6 +183,7 @@ def process_document(document_id: int):
             extracted_pages=pages,
             document_id=document.id,
             filename=document.filename,
+            user_id=document.uploaded_by,
         )
 
         if not documents:

@@ -1,6 +1,5 @@
 import uuid
 from pathlib import Path
-
 from flask import (
     Blueprint,
     render_template,
@@ -11,9 +10,7 @@ from flask import (
     flash,
     current_app,
 )
-
 from werkzeug.utils import secure_filename
-
 from app.auth.decorators import login_required
 from app.extensions import db
 from app.models import Document
@@ -113,3 +110,31 @@ def upload():
     )
 
     return redirect(url_for("chat.chat"))
+
+
+@documents_bp.route("/mine", methods=["GET"])
+@login_required
+def my_documents():
+
+    user_id = session["user_id"]
+
+    documents = (
+        Document.query
+        .filter_by(uploaded_by=user_id)
+        .order_by(
+            Document.created_at.desc()
+        )
+        .all()
+    )
+
+    return jsonify([
+        {
+            "id": document.id,
+            "filename": document.filename,
+            "file_type": document.file_type,
+            "status": document.status,
+            "created_at": document.created_at.isoformat(),
+            "updated_at": document.updated_at.isoformat(),
+        }
+        for document in documents
+    ])

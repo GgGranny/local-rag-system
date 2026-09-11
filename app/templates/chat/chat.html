@@ -1,67 +1,140 @@
 {% extends "base.html" %}
 
-{% block title %}
-Chat — Local RAG
-{% endblock %}
-
 {% block content %}
 
-<div class="chat-page">
+<div class="chat-layout">
 
-    <header class="topbar">
+    <!-- ========================= -->
+    <!-- LEFT: CONVERSATIONS       -->
+    <!-- ========================= -->
 
-        <div>
-            <h1>RAG Assistant</h1>
+    <aside class="conversation-sidebar">
+
+        <div class="sidebar-header">
+
+            <h2>Conversations</h2>
+
+            <button
+                id="new-chat-button"
+                type="button"
+            >
+                + New Chat
+            </button>
+
         </div>
 
-        <a
-            href="{{ url_for('auth.logout') }}"
-            class="button secondary"
+        <div
+            id="conversation-list"
+            class="conversation-list"
         >
-            Logout
-        </a>
+            <p class="empty-state">
+                No conversations yet.
+            </p>
+        </div>
+        <div class="documents-section">
+            <div class="documents-header">
+                <h2>My Documents</h2>
+                <button
+                    id="upload-button"
+                    type="button"
+                >
+                    + Upload
+                </button>
+            </div>
 
-    </header>
+            <input
+                id="file-input"
+                type="file"
+                hidden
+                accept=".pdf,.doc,.docx,.txt,.csv"
+            >
+
+            <div
+                id="document-list"
+                class="document-list"
+            >
+                <p class="empty-state">
+                    No documents yet.
+                </p>
+            </div>
+        </div>
+    </aside>
 
 
-    <main class="chat-placeholder">
+    <!-- ========================= -->
+    <!-- CENTER: CHAT               -->
+    <!-- ========================= -->
 
-        <div class="card">
+    <main class="chat-main">
 
-            <h2>Chat</h2>
+        <div
+            id="chat-messages"
+            class="chat-messages"
+        >
 
-            <p>
-                RAG chat interface will be implemented
-                after the document pipeline.
+            <div
+                id="chat-empty"
+                class="chat-empty"
+            >
+                <h1>Document Assistant</h1>
+
+                <p>
+                    Ask questions about your
+                    uploaded documents.
+                </p>
+            </div>
+
+        </div>
+
+
+        <!-- ========================= -->
+        <!-- INPUT                     -->
+        <!-- ========================= -->
+
+        <div class="chat-input-area">
+
+            <textarea
+                id="chat-input"
+                placeholder="Ask a question..."
+                rows="1"
+            ></textarea>
+
+            <button
+                id="send-button"
+                type="button"
+            >
+                Send
+            </button>
+
+        </div>
+
+    </main>
+
+
+    <!-- ========================= -->
+    <!-- RIGHT: SOURCES             -->
+    <!-- ========================= -->
+
+    <aside class="source-sidebar">
+
+        <div class="source-header">
+
+            <h2>Sources</h2>
+
+        </div>
+
+        <div
+            id="source-list"
+            class="source-list"
+        >
+
+            <p class="empty-state">
+                Sources will appear here.
             </p>
 
         </div>
-        <section class="upload-section">
 
-    <h2>Upload Document</h2>
-
-    <form
-        method="POST"
-        action="{{ url_for('documents.upload') }}"
-        enctype="multipart/form-data"
-    >
-
-        <input
-            type="file"
-            name="file"
-            accept=".pdf,.doc,.docx,.txt,.csv"
-            required
-        >
-
-        <button type="submit">
-            Upload
-        </button>
-
-    </form>
-
-</section>
-
-    </main>
+    </aside>
 
 </div>
 
