@@ -7,6 +7,7 @@
         <h2>Admin</h2>
         <nav aria-label="Admin navigation">
             <a href="{{ url_for('admin.dashboard') }}" class="{{ 'active' if request.endpoint == 'admin.dashboard' else '' }}">Dashboard</a>
+            <a href="{{ url_for('monitoring.dashboard') }}" class="{{ 'active' if request.endpoint == 'monitoring.dashboard' else '' }}">Monitoring</a>
             <a href="{{ url_for('admin.documents') }}" class="{{ 'active' if request.endpoint == 'admin.documents' else '' }}">Documents</a>
             <a href="{{ url_for('admin.dashboard') }}#users">Users</a>
             <a href="{{ url_for('chat.chat') }}">Chat</a>

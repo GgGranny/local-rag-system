@@ -12,6 +12,7 @@ from app.auth.decorators import login_required
 from app.extensions import db
 from app.models import Conversation, Document, User
 from app.chat.graph import build_graph
+from app.monitoring.service import begin_execution, measured
 from flask import render_template
 
 
@@ -179,10 +180,12 @@ def ask():
         selected_documents = Document.query.filter(
             Document.id.in_(selected_document_ids),
             Document.status == "COMPLETED",
-        )
-        selected_document_ids = [
-            document.id for document in selected_documents.all()
-        ]
+        ).all()
+        valid_document_ids = {document.id for document in selected_documents}
+        if valid_document_ids != set(selected_document_ids):
+            return jsonify({
+                "error": "Every selected document must exist and be completed."
+            }), 400
 
     # --------------------------------------------------
     # CONVERSATION OWNERSHIP
@@ -217,15 +220,23 @@ def ask():
         }
     }
 
+    execution = begin_execution(
+        user_id=user.id,
+        user_role=user.role,
+        conversation_id=conversation.id,
+        selected_document_ids=selected_document_ids,
+        question=question,
+    )
     try:
 
-        result = graph.invoke(
-            {
-                "messages": [
-                    HumanMessage(
-                        content=question
-                    )
-                ],
+        with measured("rag.request", user_id=user.id, conversation_id=conversation.id):
+            result = graph.invoke(
+                {
+                    "messages": [
+                        HumanMessage(
+                            content=question
+                        )
+                    ],
 
                 # Retained as chat context for auditing. Completed documents
                 # are shared, so retrieval is status-based rather than owner-based.
@@ -234,16 +245,16 @@ def ask():
                 "is_admin":
                     user.role == "ADMIN",
 
-                "selected_document_ids": selected_document_ids,
-            },
-            config=config
-        )
+                    "selected_document_ids": selected_document_ids,
+                },
+                config=config
+            )
 
-        conversation.updated_at = (
-            datetime.utcnow()
-        )
+        with measured("rag.persistence"):
+            conversation.updated_at = datetime.utcnow()
+            db.session.commit()
 
-        db.session.commit()
+        execution.complete(result)
 
         return jsonify({
 
@@ -272,6 +283,7 @@ def ask():
     except Exception as exc:
 
         db.session.rollback()
+        execution.fail(exc)
 
         print(
             f"[CHAT] Error: {exc}"

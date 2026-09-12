@@ -1,8 +1,14 @@
+import uuid
+from pathlib import Path
+
+from app.config import Config
 from app.extensions import db
 
 from app.models import (
     Document,
     DocumentChunk,
+    DocumentImage,
+    DocumentSourcePage,
 )
 
 from app.ingestion.loaders import extract_text
@@ -11,6 +17,64 @@ from app.ingestion.chunking import (
     create_documents,
     chunk_documents,
 )
+
+
+IMAGE_MIME_TYPES = {
+    "png": "image/png",
+    "jpg": "image/jpeg",
+    "jpeg": "image/jpeg",
+    "gif": "image/gif",
+    "webp": "image/webp",
+}
+
+
+def replace_document_images(document: Document, pages: list[dict]) -> None:
+    """Persist extracted source visuals without exposing their filesystem path."""
+    image_directory = Path(Config.SOURCE_IMAGE_FOLDER)
+    image_directory.mkdir(parents=True, exist_ok=True)
+
+    for existing in DocumentImage.query.filter_by(document_id=document.id).all():
+        asset_path = image_directory / existing.stored_filename
+        if asset_path.is_file():
+            asset_path.unlink()
+        db.session.delete(existing)
+
+    image_count = 0
+    for page in pages:
+        for image in page.get("images", []):
+            data = image.get("data")
+            extension = str(image.get("extension", "png")).lower()
+            if not data or extension not in IMAGE_MIME_TYPES:
+                continue
+            stored_filename = f"{document.id}_{uuid.uuid4().hex}.{extension}"
+            (image_directory / stored_filename).write_bytes(data)
+            db.session.add(DocumentImage(
+                document_id=document.id,
+                image_id=f"source_image_{uuid.uuid4().hex}",
+                stored_filename=stored_filename,
+                mime_type=IMAGE_MIME_TYPES[extension],
+                page_number=image.get("page_number"),
+                image_index=image.get("image_index", image_count),
+                vertical_position=image.get("vertical_position"),
+                source_kind=image.get("source_kind", "embedded"),
+            ))
+            image_count += 1
+
+    print(f"[INGESTION] Preserved {image_count} source images.")
+
+
+def replace_document_source_pages(document: Document, pages: list[dict]) -> None:
+    """Store unchunked page text for a readable, continuous source view."""
+    DocumentSourcePage.query.filter_by(document_id=document.id).delete(
+        synchronize_session=False
+    )
+    for page in pages:
+        db.session.add(DocumentSourcePage(
+            document_id=document.id,
+            page_number=page.get("page_number", 1),
+            content=page.get("text", ""),
+            extraction_method=page.get("extraction_method", "native"),
+        ))
 
 from app.retrieval.vector_store import (
     index_chunks,
@@ -88,8 +152,12 @@ def process_document(document_id: int):
             f"{len(pages)} content units."
         )
 
-        # Remove empty pages/content
+        # Preserve visuals from every page, even when a chart/figure-only
+        # page has no retrievable text.  Textless pages are excluded only
+        # from chunk creation below.
+        source_pages = pages
 
+        # Remove empty pages/content from the retrieval pipeline.
         pages = [
             page
             for page in pages
@@ -105,6 +173,9 @@ def process_document(document_id: int):
                 "No readable text was extracted "
                 "from the document."
             )
+
+        replace_document_images(document, source_pages)
+        replace_document_source_pages(document, source_pages)
 
         # --------------------------------------------------
         # CREATE PAGE DOCUMENTS
