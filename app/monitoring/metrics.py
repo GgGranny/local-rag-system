@@ -41,15 +41,17 @@ def percentile(values, point):
     return round(values[lower] + (values[upper] - values[lower]) * (position - lower), 2)
 
 
-def _availability(value, enabled: bool, *, applicable: bool = True):
+def _availability(value, enabled: bool, *, applicable: bool = True, trace_status: str | None = None):
     """Make privacy and missing-data states distinguishable to the UI."""
     if not applicable:
         return {"available": False, "reason": "not_applicable", "value": None}
     if value is not None:
         return {"available": True, "reason": None, "value": value}
     if not enabled:
-        return {"available": False, "reason": "privacy_disabled", "value": None}
-    return {"available": False, "reason": "not_collected", "value": None}
+        return {"available": False, "reason": "disabled_by_configuration", "value": None}
+    if trace_status == "FAILED":
+        return {"available": False, "reason": "not_collected", "value": None}
+    return {"available": False, "reason": "missing_from_trace", "value": None}
 
 
 def trace_payload(trace: RAGTrace, include_content=False):
@@ -92,16 +94,19 @@ def trace_payload(trace: RAGTrace, include_content=False):
     }
     if include_content:
         data.update({
-            "original_query": _availability(trace.original_query, Config.MONITORING_STORE_CONTENT),
-            "retrieval_query": _availability(trace.retrieval_query, Config.MONITORING_STORE_CONTENT),
+            "original_query": _availability(trace.original_query, Config.MONITORING_STORE_CONTENT, trace_status=trace.status),
+            "retrieval_query": _availability(trace.retrieval_query, Config.MONITORING_STORE_CONTENT, trace_status=trace.status),
             "retrieved_chunks": _availability(
                 load(trace.retrieved_chunks_json, "[]") if trace.retrieved_chunks_json is not None else None,
-                Config.MONITORING_STORE_CONTEXT,
+                Config.MONITORING_STORE_RETRIEVED_CHUNKS, trace_status=trace.status,
             ),
-            "context": _availability(trace.context_text, Config.MONITORING_STORE_CONTEXT),
-            "prompt": _availability(trace.prompt_text, Config.MONITORING_STORE_PROMPTS),
-            "answer": _availability(trace.answer_text, Config.MONITORING_STORE_CONTENT),
-            "citations": load(trace.citations_json, "[]"),
+            "context": _availability(trace.context_text, Config.MONITORING_STORE_CONTEXT, trace_status=trace.status),
+            "prompt": _availability(trace.prompt_text, Config.MONITORING_STORE_PROMPTS, trace_status=trace.status),
+            "answer": _availability(trace.answer_text, Config.MONITORING_STORE_GENERATED_ANSWERS, trace_status=trace.status),
+            "citations": _availability(
+                load(trace.citations_json, "[]") if trace.citations_json is not None else None,
+                Config.MONITORING_STORE_CITATIONS, trace_status=trace.status,
+            ),
         })
     return data
 

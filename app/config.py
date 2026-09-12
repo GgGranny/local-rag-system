@@ -108,6 +108,7 @@ class Config:
     )
 
     # Optional observability, with sensitive content disabled by default.
+    MONITORING_ENABLED = os.getenv("MONITORING_ENABLED", "true").lower() == "true"
     PHOENIX_ENABLED = os.getenv("PHOENIX_ENABLED", "false").lower() == "true"
     PHOENIX_ENDPOINT = os.getenv("PHOENIX_ENDPOINT", "http://localhost:6006")
     PHOENIX_PROJECT_NAME = os.getenv("PHOENIX_PROJECT_NAME", "local-rag")
@@ -124,6 +125,15 @@ class Config:
     ).lower() == "true"
     MONITORING_STORE_PROMPTS = os.getenv(
         "MONITORING_STORE_PROMPTS", os.getenv("PHOENIX_CAPTURE_PROMPTS", "false")
+    ).lower() == "true"
+    MONITORING_STORE_RETRIEVED_CHUNKS = os.getenv(
+        "MONITORING_STORE_RETRIEVED_CHUNKS", os.getenv("MONITORING_STORE_CONTEXT", "false")
+    ).lower() == "true"
+    MONITORING_STORE_GENERATED_ANSWERS = os.getenv(
+        "MONITORING_STORE_GENERATED_ANSWERS", os.getenv("MONITORING_STORE_CONTENT", "false")
+    ).lower() == "true"
+    MONITORING_STORE_CITATIONS = os.getenv(
+        "MONITORING_STORE_CITATIONS", os.getenv("MONITORING_STORE_CONTENT", "false")
     ).lower() == "true"
     RAGAS_AUTO_EVALUATION_ENABLED = os.getenv("RAGAS_AUTO_EVALUATION_ENABLED", "false").lower() == "true"
     RAG_GROUNDEDNESS_THRESHOLD = float(os.getenv("RAG_GROUNDEDNESS_THRESHOLD", "0.7"))

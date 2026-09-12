@@ -16,6 +16,9 @@ PHOENIX_CAPTURE_PROMPTS=false
 MONITORING_STORE_CONTENT=false
 MONITORING_STORE_CONTEXT=false
 MONITORING_STORE_PROMPTS=false
+MONITORING_STORE_RETRIEVED_CHUNKS=false
+MONITORING_STORE_GENERATED_ANSWERS=false
+MONITORING_STORE_CITATIONS=false
 RAGAS_AUTO_EVALUATION_ENABLED=false
 RAG_GROUNDEDNESS_THRESHOLD=0.7
 OLLAMA_INPUT_COST_PER_1K_TOKENS=0
@@ -27,6 +30,10 @@ To export to Arize Phoenix, install Phoenix and its OpenTelemetry integration in
 ## Data and privacy
 
 `rag_traces` stores trace metadata, timings, result status, citations, and optional content. Full questions/answers require `MONITORING_STORE_CONTENT`; retrieved chunks/context require `MONITORING_STORE_CONTEXT`; prompts require `MONITORING_STORE_PROMPTS`. The equivalent `PHOENIX_CAPTURE_*` settings remain backward-compatible defaults. Do not enable these values where the stored data would violate your local privacy policy.
+
+Local retention and Phoenix export are separate. `MONITORING_STORE_*` controls the SQLite trace record used by the admin trace-detail page. `PHOENIX_CAPTURE_*` controls Phoenix content export only. In this local development workspace, the active `.env` enables the local retention settings so administrators can inspect complete future traces while Phoenix remains optional.
+
+The trace-detail API represents each retained content field as `{ "available": true, "value": ..., "reason": null }`. Missing fields distinguish `disabled_by_configuration`, `not_collected` (the request ended before the stage), and `missing_from_trace` (for example, a trace created before retention was enabled). Existing redacted traces cannot be restored after enabling retention.
 
 The trace captures the request, query classification, optional rewrite, retrieval, context build, prompt build, generation, citation construction, and persistence timings. Token counts are stored only when the installed Ollama integration reports them. Costs are configured estimates, not local-inference bills.
 
