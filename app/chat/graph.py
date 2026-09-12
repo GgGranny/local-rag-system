@@ -194,6 +194,11 @@ def retrieve(
         False
     )
 
+    selected_document_ids = state.get(
+        "selected_document_ids",
+        []
+    )
+
     print(
         f"[GRAPH] Retrieving: "
         f"{question}"
@@ -214,6 +219,7 @@ def retrieve(
         k=5,
         user_id=user_id,
         is_admin=is_admin,
+        document_ids=selected_document_ids,
     )
 
     print(

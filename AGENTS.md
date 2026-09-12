@@ -1,216 +1,275 @@
-# RAG Application — Codex Engineering Instructions
+RAG Application — Codex Engineering Instructions
 
-## 1. Project Overview
+1. Project Overview
 
 This project is a local, document-grounded RAG (Retrieval-Augmented Generation) application.
 
-The application allows users to:
+The application allows authenticated users to:
 
-* Log in to the system.
-* Upload documents.
-* Wait for administrator approval.
-* Chat with approved and processed documents.
-* Ask follow-up questions using conversation memory.
-* View citations/sources used to generate answers.
+Log in.
+
+Upload documents.
+
+Wait for administrator approval when required.
+
+Select completed documents as retrieval sources.
+
+Chat with the shared document knowledge base.
+
+Ask follow-up questions using conversation memory.
+
+View clickable citations and source content.
 
 Administrators can:
 
-* Log in through the admin portal.
-* Create and manage users.
-* Review uploaded documents.
-* Approve or reject user documents.
-* Upload documents directly without approval.
-* Monitor document processing.
-* Use the same chat/RAG functionality as normal users.
+Log in through the admin portal.
 
-The system is intended to run locally and use local AI models through Ollama.
+Create and manage users.
 
----
+Review uploaded documents.
 
-# 2. Core Technology Stack
+Approve or reject user documents.
 
-Use the following technologies unless there is a strong technical reason not to.
+Upload documents directly without approval.
 
-### Backend / Web
+Monitor document processing.
 
-* Python
-* Flask
-* Flask-SQLAlchemy
-* Flask sessions
-* HTML
-* CSS
-* Vanilla JavaScript
+Use the same chat/RAG functionality as normal users.
 
-### Database
+Critical access rule
 
-* SQLite
+All documents with COMPLETED status are part of one shared RAG knowledge base.
+
+A completed document uploaded by User A can be retrieved by User B and by the administrator. A completed document uploaded by the administrator can be retrieved by all authenticated users.
+
+uploaded_by is retained for:
+
+audit/history
+
+uploader information
+
+"My Uploads" UI
+
+management/ownership decisions
+
+future permission features
+
+It is not a retrieval restriction.
+
+The application runs locally and uses Ollama for local AI models.
+
+2. Technology Stack
+
+Backend / Web
+
+Python
+
+Flask
+
+Flask-SQLAlchemy
+
+Flask sessions
+
+Jinja templates
+
+HTML
+
+CSS
+
+Vanilla JavaScript
+
+Browser fetch()
+
+Database
+
+SQLite
 
 SQLite stores application state such as:
 
-* users
-* documents
-* document processing status
-* conversations
-* messages
-* metadata required by the application
+users
 
-### RAG
+documents
 
-* LangChain
-* LangGraph
-* ChromaDB
-* BM25
-* Ollama
-* `langchain-ollama`
-* `langchain-chroma`
+document processing status
 
-### Document processing
+document chunks
 
-* PyMuPDF (`fitz`) for PDF text extraction
-* PaddleOCR for OCR fallback
-* DOC/DOCX extraction
-* TXT extraction
-* CSV extraction
+conversations
 
-### Chunking
+metadata
+
+LangGraph checkpoint state is stored separately in:
+
+data/rag_checkpoints.db
+
+RAG
+
+LangChain
+
+LangGraph
+
+ChromaDB
+
+BM25 (rank-bm25)
+
+Ollama
+
+langchain-ollama
+
+langchain-chroma
+
+Document processing
+
+PyMuPDF (fitz) for PDF native text extraction
+
+PaddleOCR for OCR fallback
+
+python-docx for DOCX
+
+TXT extraction
+
+CSV extraction
+
+Chunking
 
 Use:
 
-```text
 CharacterTextSplitter
-```
 
-Do not introduce a different chunking strategy unless explicitly requested.
+Do not replace it with another chunking strategy unless explicitly requested.
 
-### Retrieval
+Retrieval
 
 Use hybrid retrieval:
 
-```text
 Vector Search + BM25
-```
 
-The final retriever should combine semantic similarity with lexical matching.
+Both retrieval systems must use the same document-access rules.
 
----
+3. Technology Restrictions
 
-# 3. Important Technology Restrictions
+Do NOT introduce:
 
-## DO NOT use
+React
 
-* React
-* Next.js
-* FastAPI
-* Axios
-* Spring Boot
-* Node.js backend
-* External hosted LLMs unless explicitly requested
-* Groq unless explicitly requested
-* OpenAI API unless explicitly requested
+Next.js
+
+FastAPI
+
+Axios
+
+Spring Boot
+
+Node.js backend
+
+Groq
+
+OpenAI API
+
+hosted LLMs
+
+unless explicitly requested.
 
 The frontend must remain:
 
-```text
-Flask + Jinja templates + HTML + CSS + Vanilla JavaScript
-```
+Flask + Jinja + HTML + CSS + Vanilla JavaScript
 
 The AI models should run locally through Ollama.
 
----
+Use fetch() for browser API requests.
 
-# 4. Architecture
+Do not replace Flask with another framework.
 
-The high-level architecture is:
+4. Current Models
 
-```text
+The current default Ollama models are:
+
+OLLAMA_EMBEDDING_MODEL=qwen3-embedding:0.6b
+OLLAMA_CHAT_MODEL=qwen3:1.7b
+
+Do not silently replace these models.
+
+Model names must remain configurable through environment variables.
+
+If a coding-agent model is being selected outside the application itself, prefer a strong coding/reasoning model such as Nemotron 3.5 Lightning for complex repository work. This does not change the application's Ollama model configuration.
+
+5. Architecture
+
+High-level flow:
+
                          ┌─────────────────────┐
                          │       Browser       │
-                         │ HTML/CSS/JS         │
+                         │ HTML/CSS/JS/Jinja   │
                          └──────────┬──────────┘
                                     │
                                     ▼
                          ┌─────────────────────┐
                          │       Flask         │
-                         │ Web Application     │
+                         │   Web Application   │
                          └──────────┬──────────┘
                                     │
-              ┌─────────────────────┼─────────────────────┐
-              │                     │                     │
-              ▼                     ▼                     ▼
-        ┌───────────┐         ┌───────────┐        ┌────────────┐
-        │   Auth    │         │ Documents │        │    Chat    │
-        └───────────┘         └─────┬─────┘        └─────┬──────┘
-                                    │                     │
-                                    ▼                     │
-                            ┌───────────────┐             │
-                            │ Approval      │             │
-                            │ Workflow      │             │
-                            └───────┬───────┘             │
-                                    │                     │
-                              APPROVED ONLY              │
-                                    │                     │
-                                    ▼                     │
-                            ┌───────────────┐             │
-                            │  Ingestion    │             │
-                            └───────┬───────┘             │
-                                    │                     │
-                 ┌──────────────────┼──────────────────┐  │
-                 │                  │                  │  │
-                 ▼                  ▼                  ▼  │
-             PyMuPDF            PaddleOCR          Loaders│
-             PDF Text            OCR Fallback       DOC/TXT/CSV
-                 │                  │                  │
-                 └──────────────────┼──────────────────┘
-                                    │
-                                    ▼
-                         ┌─────────────────────┐
-                         │ CharacterTextSplitter│
-                         └──────────┬──────────┘
-                                    │
-                                    ▼
-                              ┌───────────┐
-                              │  Chunks   │
-                              └─────┬─────┘
-                                    │
-                     ┌──────────────┴──────────────┐
-                     ▼                             ▼
-              ┌─────────────┐               ┌─────────────┐
-              │   Chroma    │               │    BM25     │
-              │ Vector DB   │               │   Index     │
-              └──────┬──────┘               └──────┬──────┘
-                     │                             │
-                     └──────────────┬──────────────┘
-                                    ▼
-                         ┌─────────────────────┐
-                         │ Hybrid Retrieval    │
-                         └──────────┬──────────┘
-                                    │
-                                    ▼
-                            ┌──────────────┐
-                            │ Ollama LLM   │
-                            └──────┬───────┘
+                ┌───────────────────┼───────────────────┐
+                │                   │                   │
+                ▼                   ▼                   ▼
+          ┌───────────┐      ┌────────────┐      ┌───────────┐
+          │   Auth    │      │ Documents  │      │   Chat    │
+          └───────────┘      └─────┬──────┘      └─────┬─────┘
+                                   │                   │
+                                   ▼                   │
+                            ┌──────────────┐           │
+                            │   Approval   │           │
+                            │   Workflow   │           │
+                            └──────┬───────┘           │
+                                   │                   │
+                              APPROVED                │
+                                   │                   │
+                                   ▼                   │
+                            ┌──────────────┐           │
+                            │  Ingestion   │           │
+                            └──────┬───────┘           │
+                                   │                   │
+                 ┌─────────────────┼─────────────────┐ │
+                 │                 │                 │ │
+                 ▼                 ▼                 ▼ │
+              PyMuPDF          PaddleOCR          Loaders
+                 │              fallback         DOCX/TXT/CSV
+                 └─────────────────┼─────────────────┘
+                                   │
+                                   ▼
+                         CharacterTextSplitter
+                                   │
+                                   ▼
+                                Chunks
+                                   │
+                     ┌─────────────┴─────────────┐
+                     ▼                           ▼
+                  Chroma                       BM25
+               Vector Store                   Index
+                     │                           │
+                     └─────────────┬─────────────┘
+                                   ▼
+                           Hybrid Retrieval
+                                   │
+                                   ▼
+                              LangGraph
+                                   │
+                                   ▼
+                             Ollama LLM
                                    │
                                    ▼
                          Answer + Citations
-```
 
----
+6. Current Project Structure
 
-# 5. Project Structure
+The current application is organized approximately as:
 
-Use a modular structure.
-
-The exact structure can evolve as the application grows, but follow this general organization:
-
-```text
 rag-app/
-│
-├── AGENTS.md
 ├── README.md
-├── requirements.txt
+├── AGENTS.md
 ├── .env
 ├── .env.example
 ├── .gitignore
+├── requirements.txt
 ├── run.py
 │
 ├── app/
@@ -222,8 +281,8 @@ rag-app/
 │   │   ├── __init__.py
 │   │   ├── user.py
 │   │   ├── document.py
-│   │   ├── conversation.py
-│   │   └── message.py
+│   │   ├── chunk.py
+│   │   └── conversation.py
 │   │
 │   ├── auth/
 │   │   ├── __init__.py
@@ -236,34 +295,29 @@ rag-app/
 │   │
 │   ├── documents/
 │   │   ├── __init__.py
-│   │   ├── routes.py
-│   │   └── services.py
+│   │   └── routes.py
 │   │
 │   ├── ingestion/
 │   │   ├── __init__.py
-│   │   ├── pipeline.py
 │   │   ├── loaders.py
 │   │   ├── pdf.py
-│   │   ├── ocr.py
-│   │   ├── tables.py
-│   │   └── chunking.py
+│   │   ├── chunking.py
+│   │   └── pipeline.py
 │   │
 │   ├── retrieval/
 │   │   ├── __init__.py
-│   │   ├── vector.py
-│   │   ├── bm25.py
+│   │   ├── vector_store.py
+│   │   ├── bm25_store.py
 │   │   └── hybrid.py
-│   │
-│   ├── rag/
-│   │   ├── __init__.py
-│   │   ├── graph.py
-│   │   ├── state.py
-│   │   ├── prompts.py
-│   │   └── service.py
 │   │
 │   ├── chat/
 │   │   ├── __init__.py
-│   │   └── routes.py
+│   │   ├── routes.py
+│   │   ├── llm.py
+│   │   ├── service.py
+│   │   ├── state.py
+│   │   ├── checkpointer.py
+│   │   └── graph.py
 │   │
 │   ├── templates/
 │   │   ├── base.html
@@ -284,370 +338,414 @@ rag-app/
 │
 ├── data/
 │   ├── rag.db
+│   ├── rag_checkpoints.db
 │   ├── uploads/
-│   ├── chroma/
-│   └── indexes/
+│   └── chroma_db/
 │
-└── tests/
-```
+└── test/
 
-Do not create every directory immediately.
+Do not create every possible module in advance.
 
-Create directories only when their functionality is implemented.
+Create files/directories only when their functionality is actually implemented.
 
----
+7. Development Philosophy
 
-# 6. Development Philosophy
+Build incrementally.
 
-Build the application incrementally.
+Do NOT implement the entire system in one step.
 
-Do NOT implement the entire RAG system in one step.
+For every feature:
 
-Each phase must:
+Inspect existing code.
 
-1. Implement one logical feature.
-2. Run the application.
-3. Test the feature.
-4. Fix errors.
-5. Confirm the feature works.
-6. Only then move to the next phase.
+Understand the current behavior.
 
-Do not jump ahead.
+Implement the smallest required change.
 
----
+Run the application or relevant tests.
 
-# 7. Current Development Phase
+Fix errors.
 
-The application is currently in the foundation/authentication phase.
+Confirm the feature works.
 
-Current goals:
+Only then move to the next logical feature.
 
-```text
-Flask
-  ↓
-SQLite
-  ↓
-User model
-  ↓
-Admin model/role
-  ↓
-Login
-  ↓
-Session authentication
-  ↓
-Role authorization
-  ↓
-Admin dashboard
-```
+Do not jump ahead unnecessarily.
 
-Do NOT implement:
+8. Existing-Code Preservation Rule
 
-* Chroma
-* BM25
-* OCR
-* embeddings
-* RAG
-* LangGraph
-* document ingestion
+This is one of the most important rules.
 
-until the authentication foundation is confirmed working.
+Before modifying code:
 
----
+Inspect the existing implementation.
 
-# 8. Authentication Requirements
+Identify which parts already work.
+
+Reuse working components.
+
+Modify only what is necessary.
+
+Do not rewrite unrelated files.
+
+Do not replace working APIs without a clear reason.
+
+Do not introduce a new framework for a small problem.
+
+Preserve existing route names and response formats unless the requested feature requires a change.
+
+If something is broken, fix the root cause instead of rewriting the architecture.
+
+9. Authentication
 
 There are two roles:
 
-```text
 ADMIN
 USER
-```
 
 There is no public registration.
 
 Users are created by administrators.
 
-The default administrator is created automatically when the application starts if no admin exists.
+The default administrator is created automatically at startup if no admin exists.
 
 Environment variables:
 
-```env
 DEFAULT_ADMIN_USERNAME=admin
 DEFAULT_ADMIN_PASSWORD=admin123
-```
 
 Passwords must always be hashed.
 
-Never store plaintext passwords in the database.
+Use:
 
-Use Werkzeug password hashing:
-
-```python
 generate_password_hash()
 check_password_hash()
-```
 
----
+Never store plaintext passwords.
 
-# 9. Session Authentication
+10. Session Authentication
 
 Use Flask sessions.
 
 After successful login:
 
-```python
 session.clear()
-
 session["user_id"] = user.id
 session["role"] = user.role
-```
 
-Authenticated routes must verify that the session contains a valid user.
+Protected routes must verify the authenticated user.
 
-Inactive users must not be allowed to access protected routes.
+Inactive users must not access protected routes.
 
----
+11. Authorization
 
-# 10. Authorization
+Use reusable decorators:
 
-Create reusable decorators.
-
-At minimum:
-
-```text
 login_required
 admin_required
-```
 
 Normal users must NOT be able to:
 
-* approve documents
-* reject documents
-* create administrators
-* access admin dashboard
-* access other users' private documents
+approve documents
+
+reject documents
+
+create administrators
+
+access the admin dashboard
+
+perform admin-only document management
 
 Administrators can:
 
-* manage users
-* review documents
-* approve/reject documents
-* upload documents
-* access chat
+manage users
 
-Authorization must always be enforced on the server.
+review documents
 
-Do not rely only on hiding buttons in JavaScript.
+approve/reject documents
 
----
+upload documents
 
-# 11. Document Workflow
+access chat
 
-Document lifecycle:
+manage documents according to admin permissions
 
-```text
+Authorization must always be enforced server-side.
+
+Hiding a button in JavaScript is not authorization.
+
+12. Document Lifecycle
+
+The lifecycle is:
+
 PENDING
-    │
-    ├── APPROVED
-    │      │
-    │      ▼
-    │  PROCESSING
-    │      │
-    │      ▼
-    │  COMPLETED
-    │
-    ├── REJECTED
-    │
-    └── FAILED
-```
+   │
+   ├── APPROVED
+   │      │
+   │      ▼
+   │  PROCESSING
+   │      │
+   │      ▼
+   │  COMPLETED
+   │
+   ├── REJECTED
+   │
+   └── FAILED
 
-## User upload
+Only COMPLETED documents are searchable.
 
-When a normal user uploads a document:
+The following are never searchable:
 
-```text
-UPLOAD
-   ↓
-Create DB record
-   ↓
 PENDING
-```
-
-Nothing should be indexed yet.
-
-Do NOT:
-
-* create embeddings
-* add to Chroma
-* add to BM25
-
-until an administrator approves the document.
-
----
-
-# 12. Admin Upload
-
-When an administrator uploads a document:
-
-```text
-UPLOAD
-   ↓
 APPROVED
-   ↓
-PROCESSING
-   ↓
-EXTRACTION
-   ↓
-CHUNKING
-   ↓
-EMBEDDING
-   ↓
-CHROMA + BM25
-   ↓
-COMPLETED
-```
-
-Admin uploads do not require manual approval.
-
----
-
-# 13. Retrieval Restrictions
-
-The RAG system must only retrieve content from documents whose status is:
-
-```text
-COMPLETED
-```
-
-Never retrieve from:
-
-```text
-PENDING
 PROCESSING
 REJECTED
 FAILED
-```
 
-If a document is rejected or deleted, its indexed content must not remain searchable.
+APPROVED means approval has happened; it does not mean the document is already available to RAG.
 
----
+13. User Upload Workflow
 
-# 14. Supported Documents
+For a normal user:
 
-Initial supported formats:
+UPLOAD
+  ↓
+Create DB record
+  ↓
+PENDING
+  ↓
+Admin approval
+  ↓
+APPROVED
+  ↓
+PROCESSING
+  ↓
+EXTRACTION
+  ↓
+CHUNKING
+  ↓
+EMBEDDING
+  ↓
+CHROMA + BM25
+  ↓
+COMPLETED
 
-```text
+Before approval:
+
+do not create embeddings
+
+do not add to Chroma
+
+do not add to BM25
+
+do not allow RAG retrieval
+
+14. Admin Upload Workflow
+
+Admin uploads bypass manual approval:
+
+UPLOAD
+  ↓
+APPROVED
+  ↓
+PROCESSING
+  ↓
+EXTRACTION
+  ↓
+CHUNKING
+  ↓
+EMBEDDING
+  ↓
+CHROMA + BM25
+  ↓
+COMPLETED
+
+Once completed, the document is immediately part of the shared RAG knowledge base.
+
+15. Shared Document Access — CRITICAL
+
+This replaces any previous owner-only retrieval rule.
+
+Retrieval access
+
+All authenticated users and admins can retrieve all documents where:
+
+status == COMPLETED
+
+There is no condition like:
+
+uploaded_by == current_user.id
+
+for normal RAG retrieval.
+
+For example:
+
+User A uploads A.pdf
+User B uploads B.pdf
+Admin uploads C.pdf
+
+After all three are COMPLETED:
+
+User A → can retrieve A.pdf, B.pdf, C.pdf
+User B → can retrieve A.pdf, B.pdf, C.pdf
+Admin  → can retrieve A.pdf, B.pdf, C.pdf
+
+Uploader identity still matters
+
+uploaded_by is retained for:
+
+audit
+
+uploader display
+
+"My Uploads"
+
+admin management
+
+future ownership features
+
+It must not be used to hide completed documents from RAG retrieval.
+
+Important distinction
+
+RAG access ≠ management permission
+
+A user may retrieve another user's completed document without being allowed to delete, reject, reprocess, or administer that document.
+
+16. Selected Document Retrieval
+
+The chat UI allows users to select documents.
+
+When selected document IDs are supplied:
+
+retrieve only from:
+    COMPLETED documents
+    AND selected document IDs
+
+The backend must validate every selected ID.
+
+A selected document is valid for RAG only if:
+
+The document exists.
+
+The document status is COMPLETED.
+
+The authenticated user is allowed to use the shared RAG knowledge base.
+
+Because completed documents are shared, uploader identity must not be checked.
+
+If no documents are selected:
+
+retrieve from all COMPLETED shared documents
+
+This rule must be enforced in:
+
+vector retrieval
+
+BM25 retrieval
+
+hybrid retrieval
+
+Do not filter one retriever differently from the other.
+
+17. Supported Documents
+
+Initial formats:
+
 .pdf
 .doc
 .docx
 .txt
 .csv
-```
 
-The architecture should make it possible to add more formats later.
+The ingestion architecture should remain extensible.
 
-Do not hard-code the ingestion pipeline around PDF only.
+Do not hard-code the system around PDF only.
 
----
+18. PDF Processing
 
-# 15. PDF Processing
+Use PyMuPDF (fitz) first.
 
-Use PyMuPDF (`fitz`) as the primary PDF extraction library.
+Strategy:
 
-Processing strategy:
-
-```text
-PDF
- ↓
+PDF page
+   ↓
 PyMuPDF native text extraction
- ↓
-Is extracted text sufficient?
- ├── YES → use extracted text
- └── NO
-       ↓
-   Rasterize page
-       ↓
-   PaddleOCR
-       ↓
-   OCR text
-```
+   ↓
+Is text sufficient?
+   ├── YES → use native text
+   └── NO
+         ↓
+      rasterize page
+         ↓
+      PaddleOCR
+         ↓
+      OCR text
 
 Do not OCR every page unnecessarily.
 
-Native PDF text extraction should be attempted first.
+19. OCR
 
----
+Use PaddleOCR as the fallback engine.
 
-# 16. OCR
+OCR is appropriate when:
 
-Use PaddleOCR as the fallback OCR engine.
+native text is missing
 
-OCR should primarily be used when:
+native text is suspiciously short
 
-* the page contains little/no native text
-* the PDF is scanned
-* the PDF page is image-based
+the PDF is scanned
 
-Each extracted page should retain metadata such as:
+the page is image-based
 
-```text
-extraction_method = pymupdf
-```
+Each page should retain:
+
+extraction_method = native
 
 or:
 
-```text
 extraction_method = paddleocr
-```
 
-OCR initialization should avoid repeatedly creating the OCR model.
+Prefer singleton/lazy OCR initialization so the model is not repeatedly initialized.
 
-Prefer a singleton/lazy initialization pattern.
+Current PaddleOCR setup includes compatibility environment flags where required by the installed version. Do not remove working compatibility settings without testing the installed PaddleOCR version.
 
----
+20. Tables
 
-# 17. Tables
+Table processing is separate from ordinary OCR.
 
-Table extraction is separate from normal OCR.
+Do not assume OCR preserves table structure.
 
-Do not assume OCR automatically preserves table structure.
+Future intended approach:
 
-The intended table pipeline is:
-
-```text
 PDF
  ↓
 Table detection
  ↓
 Table extraction
  ↓
-CSV representation
+Structured representation
  ↓
-Normalized text representation
+RAG-friendly text representation
  ↓
 Chunking
  ↓
 Embedding
-```
 
-For RAG, table data should have both:
+Where possible, retain both:
 
-1. Structured representation where possible.
-2. Natural-language/text representation for semantic retrieval.
+Structured/table representation.
+
+Natural-language representation.
 
 Example:
-
-```text
-CSV:
 
 Name,Age,Department
 John,25,IT
 Sarah,28,HR
-```
 
-Can additionally become:
+can also become:
 
-```text
 Name: John
 Age: 25
 Department: IT
@@ -655,105 +753,166 @@ Department: IT
 Name: Sarah
 Age: 28
 Department: HR
-```
 
-This makes table content easier for retrieval.
+Do not introduce advanced table extraction until the basic ingestion pipeline is stable.
 
-Do not implement advanced table extraction until the basic ingestion pipeline is working.
-
----
-
-# 18. Chunking
+21. Chunking
 
 Use:
 
-```text
 CharacterTextSplitter
-```
 
-Chunk metadata must be preserved.
+Current intended configuration:
 
-At minimum, metadata should include:
+CharacterTextSplitter(
+    separator="\n",
+    chunk_size=1000,
+    chunk_overlap=150,
+    length_function=len,
+)
 
-```text
+Do not change chunking parameters casually because retrieval behavior depends on them.
+
+Every chunk must preserve traceable metadata.
+
+Minimum metadata:
+
 document_id
 filename
 page_number
 chunk_id
+chunk_index
 content_type
 extraction_method
-```
+status
 
-Potential future metadata:
+Uploader metadata may be retained for provenance, but must not become an unintended retrieval restriction.
 
-```text
-table_id
-source_type
-file_type
-```
+22. Chroma
 
-Never create chunks without traceable source metadata.
+Use persistent Chroma.
 
----
+Current path:
 
-# 19. Chroma
+data/chroma_db/
 
-Use Chroma as the persistent vector database.
+Current collection:
 
-Current intended path:
-
-```text
-data/chroma/
-```
+my_documents
 
 Use:
 
-```text
 langchain-chroma
-```
 
-The embedding model should be provided by Ollama.
+Embedding model:
 
-Current preferred embedding model:
-
-```text
 qwen3-embedding:0.6b
-```
 
-Do not replace the embedding model unless explicitly requested.
+Chroma must contain only content that is eligible for RAG.
 
----
+When a document is deleted, its vectors must be deleted.
 
-# 20. BM25
+When a document is no longer COMPLETED, it must not remain retrievable.
 
-Use BM25 as the lexical retrieval component.
+23. BM25
 
-The purpose of BM25 is to complement semantic vector retrieval.
+Use rank-bm25.
 
-Vector search is good for:
+BM25 complements semantic retrieval.
 
-```text
-semantic similarity
-```
+Useful for:
 
-BM25 is useful for:
-
-```text
 exact terms
+
 names
-keywords
+
 technical terminology
+
 numbers
+
+identifiers
+
 rare phrases
-```
 
----
+The BM25 index must use the same shared-access rules as Chroma:
 
-# 21. Hybrid Retrieval
+COMPLETED documents only
 
-The intended retrieval architecture:
+and, when selected document IDs are provided:
 
-```text
+selected document IDs only
+
+Do not accidentally reintroduce:
+
+uploaded_by == current_user.id
+
+into BM25.
+
+24. SQLAlchemy Session Rule
+
+Never allow detached SQLAlchemy objects to leak into retrieval logic.
+
+A common failure is:
+
+Parent instance <DocumentChunk ...> is not bound to a Session;
+lazy load operation of attribute 'document' cannot proceed
+
+This usually happens when code accesses:
+
+chunk.document
+
+after the SQLAlchemy session has closed.
+
+Preferred fix
+
+When loading chunks that need the related document, eagerly load the relationship:
+
+from sqlalchemy.orm import joinedload
+
+chunks = (
+    DocumentChunk.query
+    .options(joinedload(DocumentChunk.document))
+    .join(Document)
+    .filter(Document.status == "COMPLETED")
+    .all()
+)
+
+Do not fix this by randomly calling merge() or add() on detached objects.
+
+Better retrieval boundary
+
+Convert ORM objects into plain dictionaries while the session is active:
+
+{
+    "chunk_id": chunk.chunk_id,
+    "document_id": chunk.document_id,
+    "filename": chunk.document.filename,
+    "content": chunk.content,
+    "page_number": chunk.page_number,
+    "chunk_index": chunk.chunk_index,
+    "extraction_method": chunk.extraction_method,
+}
+
+The retrieval and LangGraph layers should preferably operate on plain serializable data rather than SQLAlchemy ORM instances.
+
+This makes:
+
+Database
+   ↓
+ORM query
+   ↓
+plain dictionaries
+   ↓
+retrieval
+   ↓
+LangGraph
+
+the preferred boundary.
+
+25. Hybrid Retrieval
+
+Architecture:
+
 User Query
     │
     ├───────────────┐
@@ -762,750 +921,34 @@ Vector Search     BM25
     │               │
     └───────┬───────┘
             ▼
-     Combine Results
+      Combine Results
+            ▼
+        Normalize
             ▼
        Rank / Merge
             ▼
-      Context Chunks
-            ▼
-         Ollama
-```
+       Top Chunks
+
+Current intended weighting:
+
+Vector = 0.7
+BM25   = 0.3
+
+Chroma distance may be converted into a similarity score such as:
+
+1 / (1 + distance)
+
+then normalized before combining.
 
 Do not replace hybrid retrieval with vector-only retrieval unless explicitly requested.
 
----
+26. Retrieval Debugging
 
-# 22. Ollama
+When debugging retrieval, inspect:
 
-Use local Ollama models.
-
-The application should communicate with Ollama through:
-
-```text
-langchain-ollama
-```
-
-Do not introduce cloud LLM APIs by default.
-
-Keep model names configurable through environment variables where appropriate.
-
-Example:
-
-```env
-OLLAMA_LLM_MODEL=
-OLLAMA_EMBEDDING_MODEL=qwen3-embedding:0.6b
-```
-
-Never hard-code credentials for external services.
-
----
-
-# 23. RAG Answering
-
-The LLM must answer using retrieved document context.
-
-The system prompt should enforce:
-
-* use retrieved context
-* do not invent unsupported facts
-* clearly indicate when the answer is not present
-* preserve source references
-* answer follow-up questions using conversation history plus retrieved context
-
-The model should not treat conversation memory as authoritative document evidence.
-
----
-
-# 24. Conversation Memory
-
-The application should support conversational questions.
-
-Example:
-
-```text
-User:
-What is the refund policy?
-
-Assistant:
-The refund period is 30 days. [1]
-
-User:
-What about digital products?
-
-Assistant:
-For digital products, the policy states... [2]
-```
-
-The second question may require the previous conversation to understand what "digital products" refers to.
-
-However:
-
-```text
-Conversation history ≠ source of truth
-```
-
-Documents remain the source of truth.
-
-Use LangGraph checkpointing for persistent conversation state.
-
-Planned checkpoint database:
-
-```text
-data/rag_checkpoints.db
-```
-
----
-
-# 25. LangGraph
-
-Use LangGraph for the RAG workflow and checkpointed conversation state.
-
-Keep graph state explicit.
-
-A conceptual flow:
-
-```text
-START
-  ↓
-Receive Question
-  ↓
-Load Conversation State
-  ↓
-Understand / Rewrite Query if Necessary
-  ↓
-Hybrid Retrieval
-  ↓
-Build Context
-  ↓
-Generate Answer
-  ↓
-Attach Sources
-  ↓
-Save Conversation State
-  ↓
-END
-```
-
-Do not introduce unnecessary agents or complex multi-agent architecture.
-
-This is a RAG application, not a multi-agent system.
-
----
-
-# 26. Citations
-
-Every retrieved chunk must have enough metadata to trace it back to the original document.
-
-The frontend should eventually display citations such as:
-
-```text
-The company provides a 30-day refund period. [1]
-```
-
-and:
-
-```text
-Digital products are excluded from refunds. [2]
-```
-
-Citations should correspond to actual retrieved source chunks.
-
-Do not generate fake citation numbers.
-
----
-
-# 27. Source Panel
-
-The chat interface should eventually have three columns:
-
-```text
-┌──────────────┬─────────────────────────┬──────────────────┐
-│              │                         │                  │
-│ Documents    │          Chat           │     Sources      │
-│              │                         │                  │
-│ Upload       │ User question           │ [1] Document     │
-│              │                         │     content      │
-│ My documents │ Assistant answer [1]    │                  │
-│              │                         │ [2] Document     │
-│              │                         │     content      │
-└──────────────┴─────────────────────────┴──────────────────┘
-```
-
-Future citation behavior:
-
-```text
-Click [1]
-   ↓
-Open source in right panel
-   ↓
-Show original relevant content
-   ↓
-Highlight cited text
-   ↓
-Scroll source into view
-```
-
-Do not open a new browser tab.
-
-Do not use PDF.js unless explicitly requested.
-
----
-
-# 28. Security
-
-Security is a first-class requirement.
-
-Implement:
-
-* password hashing
-* session authentication
-* role-based authorization
-* secure filenames
-* upload validation
-* file size limits
-* allowed file extensions
-* path traversal protection
-* ownership checks
-* CSRF protection where appropriate
-* safe error messages
-* no arbitrary filesystem access
-* no exposure of internal server paths
-
-Never trust:
-
-```text
-filename
-user_id
-document_id
-role
-```
-
-coming from the client.
-
-Always validate them server-side.
-
----
-
-# 29. File Upload Security
-
-Never directly concatenate user-provided filenames into filesystem paths.
-
-Use secure filename handling.
-
-Validate:
-
-```text
-extension
-MIME/type where appropriate
-file size
-filename
-```
-
-Store uploaded files under:
-
-```text
-data/uploads/
-```
-
-Users must not be able to access arbitrary files on the server.
-
----
-
-# 30. Configuration
-
-Use `.env` for configurable values.
-
-Example:
-
-```env
-FLASK_SECRET_KEY=change-this-secret-key
-
-DEFAULT_ADMIN_USERNAME=admin
-DEFAULT_ADMIN_PASSWORD=admin123
-
-OLLAMA_LLM_MODEL=
-OLLAMA_EMBEDDING_MODEL=qwen3-embedding:0.6b
-```
-
-Do not commit `.env`.
-
-`.env.example` should contain safe example values.
-
-The default admin password is only suitable for local development.
-
----
-
-# 31. Database
-
-SQLite is the application database.
-
-Keep database models separated by domain.
-
-Expected models:
-
-```text
-User
-Document
-Conversation
-Message
-```
-
-Additional models can be introduced when necessary.
-
-Do not create unnecessary database tables.
-
----
-
-# 32. Code Organization Rules
-
-Keep responsibilities separated.
-
-### Routes
-
-Routes should handle:
-
-* HTTP requests
-* authentication checks
-* input validation
-* calling services
-* returning responses/templates
-
-Routes should NOT contain large RAG pipelines.
-
-### Services
-
-Business logic belongs in services.
-
-### Ingestion
-
-Document extraction and processing belong in ingestion modules.
-
-### Retrieval
-
-Retrieval logic belongs in retrieval modules.
-
-### RAG
-
-LangGraph and answer generation belong in RAG modules.
-
-### Models
-
-SQLAlchemy models should contain database structure and small domain helpers.
-
----
-
-# 33. Error Handling
-
-Do not silently swallow exceptions.
-
-Bad:
-
-```python
-try:
-    ...
-except:
-    pass
-```
-
-Prefer:
-
-```python
-try:
-    ...
-except Exception as exc:
-    logger.exception("Document processing failed")
-```
-
-Document failures should update document status:
-
-```text
-FAILED
-```
-
-where appropriate.
-
-Store enough information to diagnose the failure.
-
-Do not expose sensitive stack traces to normal users.
-
----
-
-# 34. Logging
-
-Use useful structured/logged messages for important operations.
-
-Examples:
-
-```text
-[AUTH]
-[UPLOAD]
-[DOCUMENT]
-[INGESTION]
-[OCR]
-[EMBEDDING]
-[RETRIEVAL]
-[RAG]
-```
-
-Example:
-
-```text
-[INGESTION] Processing document 12
-[OCR] Page 3 requires OCR
-[EMBEDDING] Creating embeddings for 42 chunks
-[RETRIEVAL] Vector results: 5
-[RETRIEVAL] BM25 results: 5
-```
-
-Avoid excessive logging of document contents or sensitive information.
-
----
-
-# 35. Testing Strategy
-
-Every major component should eventually have tests.
-
-Prioritize:
-
-```text
-Authentication
-Authorization
-Document status workflow
-File validation
-PDF extraction
-OCR fallback
-Chunk metadata
-Retrieval
-Citation mapping
-RAG responses
-Conversation memory
-```
-
-Before moving to the next development phase, manually verify the current phase works.
-
----
-
-# 36. Development Phases
-
-Follow this order.
-
-## Phase 1 — Foundation
-
-Implement:
-
-* Flask application
-* configuration
-* SQLite
-* SQLAlchemy
-* User model
-* default admin
-* login
-* logout
-* sessions
-* role authorization
-* admin dashboard
-
-Stop and test.
-
----
-
-## Phase 2 — User Management
-
-Implement:
-
-* admin user list
-* create user
-* activate/deactivate user
-* delete user if required
-* password handling
-
-Stop and test.
-
----
-
-## Phase 3 — Document Upload
-
-Implement:
-
-* upload UI
-* file validation
-* document model
-* upload storage
-* PENDING status
-* user document list
-
-At this stage do NOT implement embeddings.
-
-Stop and test.
-
----
-
-## Phase 4 — Admin Document Approval
-
-Implement:
-
-* admin document list
-* pending documents
-* approve
-* reject
-* status updates
-
-Stop and test.
-
----
-
-## Phase 5 — Basic Ingestion
-
-Implement:
-
-* TXT
-* CSV
-* DOC/DOCX
-* PDF using PyMuPDF
-* CharacterTextSplitter
-* metadata
-
-Do not implement hybrid retrieval yet.
-
-Stop and test.
-
----
-
-## Phase 6 — OCR
-
-Add:
-
-* scanned PDF detection
-* PaddleOCR fallback
-* extraction metadata
-* OCR error handling
-
-Do not redesign the entire ingestion pipeline.
-
-Stop and test.
-
----
-
-## Phase 7 — Table Processing
-
-Add table extraction separately.
-
-Convert extracted tables to:
-
-```text
-CSV
-```
-
-and:
-
-```text
-RAG-friendly text
-```
-
-Stop and test.
-
----
-
-## Phase 8 — Embeddings + Chroma
-
-Add:
-
-* Ollama embeddings
-* Chroma persistence
-* chunk indexing
-* document filtering
-* cleanup of stale vectors
-
-Stop and test.
-
----
-
-## Phase 9 — BM25
-
-Add:
-
-* BM25 index
-* indexing
-* persistence/rebuilding strategy
-* document filtering
-
-Stop and test.
-
----
-
-## Phase 10 — Hybrid Retrieval
-
-Combine:
-
-```text
-Chroma
-+
-BM25
-```
-
-Evaluate retrieval quality.
-
-Stop and test.
-
----
-
-## Phase 11 — RAG + Ollama
-
-Add:
-
-* RAG prompt
-* context construction
-* Ollama LLM
-* grounded answers
-* source metadata
-
-Stop and test.
-
----
-
-## Phase 12 — LangGraph Memory
-
-Add:
-
-* graph state
-* checkpointing
-* conversation history
-* follow-up question handling
-
-Stop and test.
-
----
-
-## Phase 13 — Chat UI
-
-Implement:
-
-* three-column layout
-* chat history
-* streaming if appropriate
-* citations
-* source panel
-* source highlighting
-
-Stop and test.
-
----
-
-## Phase 14 — Evaluation
-
-Add evaluation using RAGAS.
-
-Evaluate:
-
-* retrieval quality
-* answer relevance
-* faithfulness
-* context precision
-* context recall
-
-Use a ground-truth dataset.
-
----
-
-# 37. Existing Code Preservation Rule
-
-This project is being developed incrementally.
-
-Before modifying existing code:
-
-1. Inspect the current implementation.
-2. Understand why it exists.
-3. Reuse working components.
-4. Modify only what is necessary.
-5. Do not rewrite unrelated files.
-6. Do not replace working APIs without a reason.
-7. Do not introduce a new framework to solve a small problem.
-
-If a working implementation already exists, preserve it unless the requested feature requires a change.
-
----
-
-# 38. Dependency Rules
-
-Do not add dependencies casually.
-
-Before adding a package:
-
-1. Determine whether the existing stack can solve the problem.
-2. Check whether the package is actually necessary.
-3. Add it only if justified.
-4. Update `requirements.txt`.
-
-Avoid dependency duplication.
-
-For example, do not add another PDF library when PyMuPDF already satisfies the requirement unless there is a specific missing capability.
-
----
-
-# 39. Frontend Rules
-
-Use:
-
-```text
-HTML
-CSS
-Vanilla JavaScript
-```
-
-Do not introduce React.
-
-Keep JavaScript modular and readable.
-
-Use Flask routes for server-side rendering and standard browser requests for API-style interactions.
-
-Do not introduce Axios.
-
----
-
-# 40. UI Principles
-
-The UI should be:
-
-* clean
-* simple
-* functional
-* responsive
-* easy to understand
-
-Do not over-design the interface before the backend functionality works.
-
-Prioritize functionality first.
-
----
-
-# 41. RAG Quality Principles
-
-The goal is not simply to make the LLM answer questions.
-
-The goal is:
-
-```text
-Correct retrieval
-        ↓
-Relevant context
-        ↓
-Grounded answer
-        ↓
-Traceable citation
-```
-
-If the required information is not present in retrieved documents, the system should say that it cannot find the answer rather than hallucinating.
-
----
-
-# 42. Retrieval Debugging
-
-When debugging RAG, inspect each stage separately:
-
-```text
 Question
    ↓
-Query
+Standalone / rewritten question
    ↓
 Vector results
    ↓
@@ -1518,19 +961,490 @@ Final context
 Prompt
    ↓
 LLM response
-```
 
 Do not immediately blame the LLM.
 
-First determine whether the correct chunk was retrieved.
+First verify whether the correct chunk was retrieved.
 
----
+Log useful information such as:
 
-# 43. Ingestion Debugging
+[RETRIEVAL] Vector results: 5
+[RETRIEVAL] BM25 results: 5
+[RETRIEVAL] Hybrid results: 5
 
-When debugging ingestion:
+Do not print entire document contents unnecessarily.
 
-```text
+27. LangGraph State
+
+Current conceptual state includes:
+
+user_id
+is_admin
+selected_document_ids
+messages
+standalone_question
+retrieved_documents
+context
+answer
+sources
+
+user_id and is_admin represent authenticated request context.
+
+They must not be interpreted as uploader-based RAG restrictions.
+
+selected_document_ids is the retrieval scope when the user explicitly selects files.
+
+28. LangGraph Workflow
+
+Preferred graph:
+
+START
+  ↓
+rewrite_query
+  ↓
+retrieve
+  ↓
+build_context
+  ↓
+generate_answer
+  ↓
+END
+
+For follow-up questions:
+
+Conversation History
+       ↓
+Rewrite / Understand Question
+       ↓
+Hybrid Retrieval
+       ↓
+Context
+       ↓
+Answer
+
+Do not introduce unnecessary agents or multi-agent architecture.
+
+This is a RAG application, not a multi-agent system.
+
+29. Conversation Memory
+
+Example:
+
+User:
+What is the refund policy?
+
+Assistant:
+The refund period is 30 days. [1]
+
+User:
+What about digital products?
+
+Assistant:
+The policy states... [2]
+
+Conversation history helps interpret follow-up questions.
+
+However:
+
+Conversation history != document evidence
+
+Documents remain the source of truth.
+
+Use LangGraph checkpointing.
+
+Checkpoint database:
+
+data/rag_checkpoints.db
+
+Each conversation should use a stable thread ID.
+
+30. RAG Answering
+
+The LLM must answer from retrieved document context.
+
+The system prompt should enforce:
+
+use retrieved context
+
+do not invent unsupported facts
+
+say when the answer is not present
+
+preserve source references
+
+use conversation history only for conversational understanding
+
+do not treat conversation memory as authoritative evidence
+
+Current local chat model:
+
+qwen3:1.7b
+
+31. Citations
+
+Every retrieved chunk must be traceable to its source.
+
+Frontend citations should look like:
+
+The refund period is 30 days. [1]
+
+and:
+
+Digital products are excluded. [2]
+
+Citation numbers must correspond to actual retrieved source chunks.
+
+Never generate fake citations.
+
+Prefer source metadata containing:
+
+document_id
+filename
+page_number
+chunk_id
+
+32. Source Panel
+
+The chat UI must remain a three-column layout:
+
+┌──────────────┬─────────────────────────┬──────────────────┐
+│ Documents    │          Chat           │     Sources      │
+│              │                         │                  │
+│ Upload       │ User question           │ [1] Document     │
+│              │                         │     content      │
+│ Documents    │ Assistant answer [1]    │                  │
+│              │                         │ [2] Document     │
+│              │                         │     content      │
+└──────────────┴─────────────────────────┴──────────────────┘
+
+Clicking [1] should:
+
+Open the corresponding source in the right panel.
+
+Show the original relevant source content.
+
+Highlight the cited text where possible.
+
+Scroll the relevant content into view.
+
+Do not open a new browser tab.
+
+Do not use PDF.js unless explicitly requested.
+
+33. Document Sidebar / Selection
+
+The left side of chat should allow users to:
+
+see available documents
+
+see upload status
+
+select documents for retrieval
+
+distinguish their own uploads from shared documents where useful
+
+see processing state
+
+upload documents
+
+Recommended conceptual organization:
+
+My Uploads
+  ├── document A
+  └── document B
+
+Shared Documents
+  ├── document C
+  ├── document D
+  └── document E
+
+A completed document from another user is selectable.
+
+Pending/rejected/failed/processing documents must not be selectable for RAG.
+
+Do not use UI state as the security boundary. The backend must validate selected document IDs.
+
+34. Upload Status UI
+
+Uploading a document should show a status box.
+
+Example:
+
+document.pdf
+
+Waiting for approval
+
+For admin uploads:
+
+document.pdf
+
+Processing...
+
+The status UI should support a more detailed progress view where practical:
+
+Upload
+  ✓
+
+Approval
+  ✓
+
+Extraction
+  ✓
+
+OCR
+  ✓ / not required
+
+Chunking
+  ✓
+
+Embedding
+  ...
+
+Chroma
+  ...
+
+BM25
+  ...
+
+Completed
+
+Do not fake progress.
+
+Only display a stage as completed when the backend actually completed it.
+
+User uploads should clearly indicate that administrator approval is required.
+
+Admin uploads should not wait for approval.
+
+35. Chat Generation State
+
+While an answer is being generated, the UI should clearly indicate that the assistant is working.
+
+For example:
+
+Generating...
+
+or:
+
+Thinking...
+
+The state must disappear when the request finishes or fails.
+
+Do not leave the UI permanently stuck in a loading state after an exception.
+
+36. Security
+
+Security is a first-class requirement.
+
+Implement:
+
+password hashing
+
+session authentication
+
+role-based authorization
+
+secure filenames
+
+upload validation
+
+file size limits
+
+allowed extensions
+
+path traversal protection
+
+server-side document ID validation
+
+server-side selected-document validation
+
+CSRF protection where appropriate
+
+safe error messages
+
+no arbitrary filesystem access
+
+no exposure of internal server paths
+
+Never trust client-provided:
+
+filename
+user_id
+document_id
+role
+selected_document_ids
+
+Always validate them server-side.
+
+Important
+
+Do not confuse shared RAG access with management permissions.
+
+A normal user can retrieve any COMPLETED document, but this does not grant them permission to administer that document.
+
+37. File Upload Security
+
+Never concatenate a raw user filename directly into a filesystem path.
+
+Use secure filename handling.
+
+Validate:
+
+extension
+file type where appropriate
+file size
+filename
+
+Store uploaded files under:
+
+data/uploads/
+
+Users must not be able to access arbitrary files on the server.
+
+38. Configuration
+
+Use .env for configurable values.
+
+Example:
+
+FLASK_SECRET_KEY=change-this-secret-key
+
+DEFAULT_ADMIN_USERNAME=admin
+DEFAULT_ADMIN_PASSWORD=admin123
+
+CHROMA_PERSIST_DIRECTORY=data/chroma_db
+CHROMA_COLLECTION_NAME=my_documents
+
+OLLAMA_EMBEDDING_MODEL=qwen3-embedding:0.6b
+OLLAMA_CHAT_MODEL=qwen3:1.7b
+
+Never commit .env.
+
+.env.example must contain safe example values.
+
+The default admin password is only appropriate for local development.
+
+39. Database
+
+SQLite is the application database.
+
+Current database:
+
+data/rag.db
+
+Expected core models:
+
+User
+Document
+DocumentChunk
+Conversation
+
+Add models only when necessary.
+
+Do not create unnecessary tables.
+
+40. Code Organization
+
+Routes
+
+Routes should handle:
+
+HTTP requests
+
+authentication checks
+
+validation
+
+calling services
+
+returning JSON/templates
+
+Routes should not contain large RAG pipelines.
+
+Services
+
+Business logic belongs in services.
+
+Ingestion
+
+Extraction and processing belong in ingestion modules.
+
+Retrieval
+
+Vector, BM25, and hybrid retrieval belong in retrieval modules.
+
+Chat / RAG
+
+LangGraph, LLM calls, context construction, and conversation handling belong in chat/RAG modules.
+
+Models
+
+SQLAlchemy models should contain database structure and small domain helpers.
+
+41. Error Handling
+
+Never silently swallow exceptions.
+
+Bad:
+
+try:
+    ...
+except:
+    pass
+
+Prefer:
+
+try:
+    ...
+except Exception as exc:
+    logger.exception("Document processing failed")
+
+Document failures should update:
+
+FAILED
+
+where appropriate.
+
+Do not expose stack traces to normal users.
+
+For debugging, logs should contain enough information to locate the failing stage.
+
+42. Logging
+
+Use clear stage prefixes.
+
+Examples:
+
+[AUTH]
+[UPLOAD]
+[DOCUMENT]
+[INGESTION]
+[OCR]
+[CHUNKING]
+[EMBEDDING]
+[CHROMA]
+[BM25]
+[RETRIEVAL]
+[RAG]
+[CHAT]
+[CHECKPOINT]
+
+Example:
+
+[INGESTION] Processing document 12
+[OCR] Page 3 requires OCR
+[CHUNKING] Created 42 chunks
+[EMBEDDING] Indexing 42 chunks
+[RETRIEVAL] Vector results: 5
+[RETRIEVAL] BM25 results: 5
+[RAG] Generating answer
+
+Do not log entire document contents or sensitive information.
+
+43. Ingestion Debugging
+
+Debug ingestion in this order:
+
 File
  ↓
 File type
@@ -1545,107 +1459,533 @@ Chunk metadata
  ↓
 Embeddings
  ↓
-Chroma/BM25
-```
+Chroma
+ ↓
+BM25
+ ↓
+COMPLETED
 
-Log the number of:
+Log counts for:
 
-* pages
-* extracted characters
-* chunks
-* embeddings
-* indexed documents
+pages
 
-Do not print entire documents unnecessarily.
+extracted characters
 
----
+OCR pages
 
-# 44. Important Metadata Rule
+chunks
 
-Metadata is critical for citations and debugging.
+embeddings
 
-Every chunk must remain traceable to:
+indexed chunks
 
-```text
+Do not print entire documents.
+
+44. Metadata Rule
+
+Metadata is essential for:
+
+citations
+
+source viewer
+
+debugging
+
+retrieval filtering
+
+document management
+
+Every chunk must remain traceable:
+
 document
-→ page
-→ chunk
-→ extraction method
-```
+  ↓
+page
+  ↓
+chunk
+  ↓
+retrieval result
+  ↓
+citation
 
 Do not strip metadata during:
 
-* chunking
-* embedding
-* retrieval
-* reranking
-* answer generation
+chunking
 
----
+embedding
 
-# 45. Do Not Overengineer
+retrieval
 
-Prefer:
+ranking
 
-```text
+context construction
+
+answer generation
+
+45. Testing Strategy
+
+Test every major layer.
+
+Prioritize:
+
+Authentication
+Authorization
+Document upload
+Document status workflow
+Shared document access
+Selected document filtering
+File validation
+PDF extraction
+OCR fallback
+Chunk metadata
+Chroma indexing
+BM25 indexing
+Hybrid retrieval
+Citation mapping
+RAG responses
+Conversation memory
+Source viewer
+
+Required shared-access test
+
+Use at least:
+
+User A
+User B
+Admin
+
+Scenario:
+
+User A uploads a document containing ALPHA-123.
+
+Admin approves and processes it.
+
+User B uploads a document containing BETA-456.
+
+Admin approves and processes it.
+
+Admin uploads a third document and it is processed directly.
+
+User A can retrieve information from A, B, and admin documents.
+
+User B can retrieve information from A, B, and admin documents.
+
+Admin can retrieve all completed documents.
+
+Selecting only A's document retrieves only A's document.
+
+Selecting only B's document retrieves only B's document.
+
+Pending/rejected/failed/processing documents never retrieve.
+
+Deleting a document removes it from RAG.
+
+Citations map to the correct source.
+
+Follow-up questions preserve conversation context.
+
+SQLAlchemy detached-object regression test
+
+Ensure retrieval code does not fail with:
+
+Parent instance <DocumentChunk ...> is not bound to a Session
+
+When related document information is needed, either:
+
+eager-load the relationship, or
+
+serialize the data while the session is active.
+
+46. Development Phases
+
+The original broad phases are retained, but the current project is beyond the foundation stage.
+
+Phase 1 — Foundation
+
+Flask
+
+configuration
+
+SQLite
+
+SQLAlchemy
+
+User
+
+default admin
+
+login/logout
+
+sessions
+
+authorization
+
+Completed/working foundation should not be rewritten.
+
+Phase 2 — User Management
+
+admin user list
+
+create users
+
+activate/deactivate users
+
+password handling
+
+Phase 3 — Document Upload
+
+upload UI
+
+validation
+
+storage
+
+PENDING status
+
+document list
+
+Phase 4 — Admin Approval
+
+admin document list
+
+approve
+
+reject
+
+status updates
+
+Phase 5 — Basic Ingestion
+
+TXT
+
+CSV
+
+DOCX
+
+PDF with PyMuPDF
+
+CharacterTextSplitter
+
+metadata
+
+Phase 6 — OCR
+
+scanned PDF detection
+
+PaddleOCR fallback
+
+extraction metadata
+
+OCR error handling
+
+Phase 7 — Tables
+
+table detection/extraction
+
+structured representation
+
+RAG-friendly representation
+
+Phase 8 — Chroma
+
+Ollama embeddings
+
+persistent Chroma
+
+indexing
+
+cleanup
+
+completed-document filtering
+
+Phase 9 — BM25
+
+BM25 indexing
+
+rebuilding
+
+completed-document filtering
+
+Phase 10 — Hybrid Retrieval
+
+vector + BM25
+
+scoring
+
+merging
+
+selected-document filtering
+
+shared completed-document access
+
+Phase 11 — RAG + Ollama
+
+context construction
+
+prompt
+
+grounded answer
+
+sources
+
+Phase 12 — LangGraph
+
+state
+
+graph
+
+checkpointing
+
+conversation memory
+
+follow-up question rewriting
+
+Phase 13 — Chat UI
+
+three-column layout
+
+conversations
+
+document selection
+
+upload status
+
+generation state
+
+clickable citations
+
+source panel
+
+source highlighting
+
+Phase 14 — Evaluation
+
+RAGAS
+
+ground-truth dataset
+
+retrieval quality
+
+faithfulness
+
+context precision
+
+context recall
+
+answer relevance
+
+Do not implement future phases merely because they are listed here. Work only on the requested phase/feature.
+
+47. Current Development Priorities
+
+When modifying the current application, prioritize in this order:
+
+1. Keep existing working authentication
+2. Keep document approval workflow
+3. Ensure completed documents are shared
+4. Ensure selected documents constrain retrieval
+5. Fix retrieval/session issues
+6. Make upload/processing status visible
+7. Improve chat generation state
+8. Complete citations/source viewer
+9. Improve admin UI
+10. Improve RAG evaluation
+
+Do not rebuild the system from scratch.
+
+48. Dependency Rules
+
+Do not add dependencies casually.
+
+Before adding a package:
+
+Check whether the current stack already solves the problem.
+
+Determine whether the package is actually necessary.
+
+Add it only when justified.
+
+Update requirements.txt.
+
+Test the application after adding it.
+
+Avoid duplicate libraries.
+
+For example, do not add another PDF library when PyMuPDF already satisfies the requirement unless a specific missing capability requires it.
+
+49. Frontend Rules
+
+Use:
+
+Jinja
+HTML
+CSS
+Vanilla JavaScript
+fetch()
+
+Do not introduce React.
+
+Do not introduce Axios.
+
+Keep JavaScript readable and modular.
+
+Preserve the existing three-column chat layout.
+
+Do not redesign working pages unnecessarily.
+
+50. UI Principles
+
+The UI should be:
+
+clean
+
+modern
+
 simple
-explicit
-testable
-modular
-```
 
-over:
+responsive
 
-```text
-complex
-abstract
-over-engineered
-```
+functional
 
-Do not introduce:
+easy to understand
 
-* microservices
-* Kubernetes
-* Redis
-* Celery
-* message queues
-* complex agent frameworks
+Prioritize functionality and reliability over decorative UI.
 
-unless a future requirement actually justifies them.
+Important states must be visible:
 
-This is currently a local Flask RAG application.
+uploading
+waiting for approval
+approved
+processing
+extracting
+chunking
+embedding
+indexing
+completed
+failed
+generating
 
----
+Do not fake backend progress.
 
-# 46. Codex Working Procedure
+51. RAG Quality Principles
+
+The target pipeline is:
+
+Correct Retrieval
+       ↓
+Relevant Context
+       ↓
+Grounded Answer
+       ↓
+Traceable Citation
+
+If the information is not present in the retrieved context, the assistant should say it cannot find the answer rather than hallucinating.
+
+A confident answer is not a successful RAG answer if the supporting evidence was not retrieved.
+
+52. Retrieval Access Invariant
+
+This invariant must always remain true:
+
+RAG-eligible document
+    =
+status == COMPLETED
+
+Default retrieval:
+
+all COMPLETED documents
+
+Selected retrieval:
+
+COMPLETED AND document_id IN selected_document_ids
+
+Never:
+
+COMPLETED AND uploaded_by == current_user.id
+
+unless a future feature explicitly introduces private documents.
+
+If such a feature is introduced later, it must be explicitly designed rather than accidentally emerging from existing retrieval code.
+
+53. Deletion / Reprocessing Invariant
+
+When a document is deleted:
+
+SQLite Document
+   ↓
+delete DocumentChunk rows
+   ↓
+delete Chroma vectors
+   ↓
+remove from BM25 representation
+   ↓
+document no longer searchable
+
+When a document is reprocessed:
+
+old chunks must be cleaned up
+
+old vectors must be cleaned up
+
+new chunks must be indexed
+
+BM25 must reflect the new content
+
+status must accurately reflect the current processing result
+
+Avoid stale index entries.
+
+54. If Something Is Broken
+
+Do not immediately rewrite the architecture.
+
+First determine:
+
+What failed?
+Where did it fail?
+What is the exact error?
+Which module owns that behavior?
+Is the failure caused by data, session state, retrieval, ingestion, or UI?
+
+Then fix the smallest root cause.
+
+For example, for:
+
+Parent instance <DocumentChunk ...> is not bound to a Session
+
+inspect relationship loading and session lifetime before changing retrieval architecture.
+
+55. Codex Working Procedure
 
 When asked to implement a feature:
 
-### Step 1
+Step 1
 
-Inspect the relevant existing files.
+Inspect relevant existing files.
 
-### Step 2
+Step 2
 
-Explain briefly what needs to change.
+Briefly identify what needs to change.
 
-### Step 3
+Step 3
 
-Implement only the requested phase.
+Implement only the requested feature/fix.
 
-### Step 4
+Step 4
 
-Do not modify unrelated working functionality.
+Preserve unrelated working functionality.
 
-### Step 5
+Step 5
 
-Run/test the relevant code where possible.
+Run relevant tests or the application.
 
-### Step 6
+Step 6
+
+If an error occurs, fix it before claiming completion.
+
+Step 7
 
 Report:
 
-```text
 Changed:
 - file 1
 - file 2
@@ -1658,124 +1998,109 @@ Test:
 
 Next:
 - next logical step
-```
 
-Do not jump multiple phases ahead.
+Do not silently make unrelated improvements.
 
----
+56. Never Do These Things Without Explicit Request
 
-# 47. If Something Is Broken
+Do not:
 
-Do not immediately rewrite the architecture.
+migrate Flask to FastAPI
 
-First determine:
+migrate Flask/Jinja to React
 
-```text
-What failed?
-Where did it fail?
-What is the actual error?
-Which file owns that behavior?
-```
+replace SQLite with PostgreSQL
 
-Then make the smallest appropriate fix.
+replace Chroma
 
-Prefer fixing the root cause over adding workarounds.
+remove BM25
 
----
+replace CharacterTextSplitter
 
-# 48. Current Known Foundation
+replace PyMuPDF
 
-The application currently uses:
+replace PaddleOCR
 
-```text
+replace Ollama with a hosted API
+
+introduce Redis
+
+introduce Celery
+
+introduce Kubernetes
+
+introduce microservices
+
+introduce multi-agent architecture
+
+rewrite the entire project
+
+change the default embedding model
+
+change the default chat model
+
+make completed documents private based on uploader
+
+trust client-provided document access
+
+fake processing progress
+
+unless explicitly requested.
+
+57. Final Engineering Rule
+
+The most important rule:
+
+Preserve working functionality, make the smallest correct change, test it, and only then extend the system.
+
+The current RAG architecture is:
+
 Flask
-Flask-SQLAlchemy
-SQLite
-Werkzeug
-python-dotenv
-```
-
-The database is intended to live at:
-
-```text
-data/rag.db
-```
-
-The default admin is configured through:
-
-```env
-DEFAULT_ADMIN_USERNAME=admin
-DEFAULT_ADMIN_PASSWORD=admin123
-```
-
-The application entry point is:
-
-```text
-run.py
-```
-
-Run locally with:
-
-```bash
-python run.py
-```
-
-Expected development URL:
-
-```text
-http://127.0.0.1:5000
-```
-
----
-
-# 49. Final Rule
-
-The most important rule for this project:
-
-> Build the RAG system from the foundation upward. Do not add advanced RAG functionality until the simpler layer underneath it is working and tested.
-
-Development order:
-
-```text
-Flask
- ↓
-SQLite
- ↓
+  ↓
+SQLite / SQLAlchemy
+  ↓
 Authentication
- ↓
-Authorization
- ↓
-Users
- ↓
-Documents
- ↓
-Approval
- ↓
-Ingestion
- ↓
-OCR / Tables
- ↓
-Chunking
- ↓
-Embeddings
- ↓
-Chroma
- ↓
-BM25
- ↓
+  ↓
+Documents + Approval
+  ↓
+PyMuPDF / PaddleOCR / Loaders
+  ↓
+CharacterTextSplitter
+  ↓
+Chunks + Metadata
+  ↓
+Chroma + BM25
+  ↓
+Shared Completed-Document Retrieval
+  ↓
 Hybrid Retrieval
- ↓
+  ↓
+LangGraph
+  ↓
 Ollama
- ↓
-RAG
- ↓
-LangGraph Memory
- ↓
+  ↓
+Grounded Answer
+  ↓
 Citations
- ↓
-UI
- ↓
-Evaluation
-```
+  ↓
+NotebookLM-style Chat UI
 
-Always preserve working functionality while extending the system.
+The central retrieval rule is:
+
+COMPLETED documents are shared across all authenticated users and admin.
+
+Uploader identity is for management/audit, not RAG visibility.
+
+Always preserve traceability:
+
+document
+  → page
+  → chunk
+  → retrieval result
+  → citation
+
+And always preserve the separation:
+
+RAG retrieval permission
+        ≠
+document management permission

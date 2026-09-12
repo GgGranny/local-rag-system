@@ -2,7 +2,7 @@
 
 {% block content %}
 
-<div class="chat-layout">
+<div class="chat-layout" data-role="{{ session.get('role', 'USER') }}">
 
     <!-- ========================= -->
     <!-- LEFT: CONVERSATIONS       -->
@@ -12,13 +12,16 @@
 
         <div class="sidebar-header">
 
-            <h2>Conversations</h2>
+            <div>
+                <p class="eyebrow">Workspace</p>
+                <h2>Conversations</h2>
+            </div>
 
             <button
                 id="new-chat-button"
                 type="button"
             >
-                + New Chat
+                New chat
             </button>
 
         </div>
@@ -33,12 +36,15 @@
         </div>
         <div class="documents-section">
             <div class="documents-header">
-                <h2>My Documents</h2>
+                <div>
+                    <p class="eyebrow">Knowledge</p>
+                    <h2>Shared documents</h2>
+                </div>
                 <button
                     id="upload-button"
                     type="button"
                 >
-                    + Upload
+                    Upload
                 </button>
             </div>
 
@@ -48,6 +54,14 @@
                 hidden
                 accept=".pdf,.doc,.docx,.txt,.csv"
             >
+
+            <div id="upload-preview" class="upload-preview" hidden></div>
+
+            <div id="upload-status" class="upload-status-card" hidden></div>
+
+            <p id="selection-summary" class="selection-summary">
+                Searching all completed documents
+            </p>
 
             <div
                 id="document-list"
@@ -76,12 +90,18 @@
                 id="chat-empty"
                 class="chat-empty"
             >
-                <h1>Document Assistant</h1>
+                <p class="eyebrow">Shared knowledge assistant</p>
+                <h1>Ask your documents</h1>
 
                 <p>
-                    Ask questions about your
-                    uploaded documents.
+                    Select documents to narrow the search, or search all
+                    completed documents in the shared knowledge base.
                 </p>
+
+                <div class="suggestion-list">
+                    <span>“What is this document about?”</span>
+                    <span>“Summarize the selected documents.”</span>
+                </div>
             </div>
 
         </div>
@@ -93,9 +113,11 @@
 
         <div class="chat-input-area">
 
+            <div id="generation-status" class="generation-status" aria-live="polite" hidden></div>
+
             <textarea
                 id="chat-input"
-                placeholder="Ask a question..."
+                placeholder="Ask about your selected documents..."
                 rows="1"
             ></textarea>
 
@@ -103,7 +125,7 @@
                 id="send-button"
                 type="button"
             >
-                Send
+                Send <span aria-hidden="true">→</span>
             </button>
 
         </div>
@@ -119,7 +141,10 @@
 
         <div class="source-header">
 
-            <h2>Sources</h2>
+            <div>
+                <p class="eyebrow">Evidence</p>
+                <h2>Sources</h2>
+            </div>
 
         </div>
 
@@ -129,7 +154,7 @@
         >
 
             <p class="empty-state">
-                Sources will appear here.
+                Select a citation in an answer to inspect its source.
             </p>
 
         </div>
@@ -137,5 +162,16 @@
     </aside>
 
 </div>
+
+<dialog id="document-progress-modal" class="progress-modal">
+    <div class="modal-header">
+        <div>
+            <p class="eyebrow">Document status</p>
+            <h2 id="progress-title">Document processing</h2>
+        </div>
+        <button id="close-progress-modal" class="icon-button" type="button" aria-label="Close">×</button>
+    </div>
+    <div id="progress-steps" class="progress-steps"></div>
+</dialog>
 
 {% endblock %}

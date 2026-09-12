@@ -14,7 +14,7 @@ def create_documents(
     Each page keeps metadata that will later be used for:
     - citations
     - source display
-    - ownership filtering
+    - uploader audit information
     - retrieval
     """
 
@@ -48,7 +48,7 @@ def create_documents(
 
             "status": "COMPLETED",
 
-            # Important for user-isolated RAG
+            # Retained for audit information; completed documents are shared.
             "user_id": user_id,
         }
 
@@ -122,7 +122,7 @@ def chunk_documents(
 
                 "status": "COMPLETED",
 
-                # Preserve ownership metadata
+                # Preserve uploader audit metadata.
                 "user_id": document.metadata.get(
                     "user_id"
                 ),

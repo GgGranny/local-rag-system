@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="admin-shell">
+    <aside class="admin-sidebar">
+        <p class="eyebrow">Document Assistant</p>
+        <h2>Admin</h2>
+        <nav aria-label="Admin navigation">
+            <a href="{{ url_for('admin.dashboard') }}" class="{{ 'active' if request.endpoint == 'admin.dashboard' else '' }}">Dashboard</a>
+            <a href="{{ url_for('admin.documents') }}" class="{{ 'active' if request.endpoint == 'admin.documents' else '' }}">Documents</a>
+            <a href="{{ url_for('admin.dashboard') }}#users">Users</a>
+            <a href="{{ url_for('chat.chat') }}">Chat</a>
+            <span aria-disabled="true">Settings</span>
+        </nav>
+        <a class="logout-link" href="{{ url_for('auth.logout') }}">Logout</a>
+    </aside>
+    <main class="admin-content">{% block admin_content %}{% endblock %}</main>
+</div>
+{% endblock %}

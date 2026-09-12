@@ -13,6 +13,7 @@ from flask import (
 )
 from werkzeug.utils import secure_filename
 from app.auth.decorators import login_required
+from sqlalchemy import or_
 from app.extensions import db
 from app.models import Document, User
 from app.ingestion.pipeline import process_document
@@ -157,7 +158,7 @@ def upload():
 @documents_bp.route("/chunks/<string:chunk_id>", methods=["GET"])
 @login_required
 def get_chunk(chunk_id):
-    """Return a cited source only when the current user owns its document."""
+    """Return a cited source from the shared completed knowledge base."""
     from app.models import DocumentChunk
 
     chunk = DocumentChunk.query.filter_by(chunk_id=chunk_id).first()
@@ -165,7 +166,7 @@ def get_chunk(chunk_id):
         return jsonify({"error": "Source not found."}), 404
 
     user = db.session.get(User, session["user_id"])
-    if not user or (not user.is_admin and chunk.document.uploaded_by != user.id):
+    if not user:
         return jsonify({"error": "Source not found."}), 404
 
     if chunk.document.status != "COMPLETED":
@@ -185,17 +186,23 @@ def get_chunk(chunk_id):
 @documents_bp.route("/mine", methods=["GET"])
 @login_required
 def my_documents():
-
+    """List a user's uploads plus every shared completed document."""
     user_id = session["user_id"]
 
-    documents = (
-        Document.query
-        .filter_by(uploaded_by=user_id)
-        .order_by(
-            Document.created_at.desc()
+    user = db.session.get(User, user_id)
+    if not user:
+        return jsonify({"error": "User not found."}), 401
+
+    query = Document.query
+    if not user.is_admin:
+        query = query.filter(
+            or_(
+                Document.uploaded_by == user_id,
+                Document.status == "COMPLETED",
+            )
         )
-        .all()
-    )
+
+    documents = query.order_by(Document.created_at.desc()).all()
 
     return jsonify([
         {
@@ -203,6 +210,9 @@ def my_documents():
             "filename": document.filename,
             "file_type": document.file_type,
             "status": document.status,
+            "uploaded_by": document.uploaded_by,
+            "uploader": document.uploader.username if document.uploader else None,
+            "is_mine": document.uploaded_by == user_id,
             "created_at": document.created_at.isoformat(),
             "updated_at": document.updated_at.isoformat(),
         }

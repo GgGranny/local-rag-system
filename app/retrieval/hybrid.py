@@ -59,17 +59,9 @@ def search_vector(
     k=5,
     user_id=None,
     is_admin=False,
+    document_ids=None,
 ):
-    """
-    Vector retrieval with ownership filtering.
-
-    Admin:
-        status == COMPLETED
-
-    Normal user:
-        status == COMPLETED
-        AND user_id == current user
-    """
+    """Search the shared vector knowledge base of completed documents."""
 
     vector_store = get_vector_store()
 
@@ -77,27 +69,11 @@ def search_vector(
     # CHROMA FILTER
     # --------------------------------------------------
 
-    if is_admin:
+    filter_parts = [{"status": "COMPLETED"}]
+    if document_ids:
+        filter_parts.append({"document_id": {"$in": document_ids}})
 
-        search_filter = {
-            "status": "COMPLETED"
-        }
-
-    else:
-
-        if user_id is None:
-            return []
-
-        search_filter = {
-            "$and": [
-                {
-                    "status": "COMPLETED"
-                },
-                {
-                    "user_id": user_id
-                }
-            ]
-        }
+    search_filter = filter_parts[0] if len(filter_parts) == 1 else {"$and": filter_parts}
 
     results = (
         vector_store
@@ -153,14 +129,14 @@ def search_hybrid(
     k=5,
     user_id=None,
     is_admin=False,
+    document_ids=None,
     vector_weight=0.7,
     bm25_weight=0.3,
 ):
     """
     Hybrid vector + BM25 retrieval.
 
-    Ownership filtering is applied to both
-    retrieval systems before merging.
+    Both retrieval systems use the shared completed-document access rule.
     """
 
     vector_results = search_vector(
@@ -168,6 +144,7 @@ def search_hybrid(
         k=k,
         user_id=user_id,
         is_admin=is_admin,
+        document_ids=document_ids,
     )
 
     bm25_results = search_bm25(
@@ -175,6 +152,7 @@ def search_hybrid(
         k=k,
         user_id=user_id,
         is_admin=is_admin,
+        document_ids=document_ids,
     )
 
     # --------------------------------------------------
