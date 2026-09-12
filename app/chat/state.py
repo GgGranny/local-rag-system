@@ -20,6 +20,8 @@ class RAGState(
 
     is_admin: bool
 
+    selected_document_ids: list[int]
+
     # --------------------------------------------------
     # CONVERSATION MEMORY
     # --------------------------------------------------

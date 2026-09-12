@@ -10,7 +10,7 @@ import uuid
 from langchain_core.messages import HumanMessage
 from app.auth.decorators import login_required
 from app.extensions import db
-from app.models import (Conversation, User)
+from app.models import Conversation, Document, User
 from app.chat.graph import build_graph
 from flask import render_template
 
@@ -138,6 +138,23 @@ def ask():
                 "thread_id is required."
         }), 400
 
+    selected_document_ids = data.get("document_ids", [])
+    if selected_document_ids is None:
+        selected_document_ids = []
+    if (
+        not isinstance(selected_document_ids, list)
+        or any(isinstance(item, bool) for item in selected_document_ids)
+    ):
+        return jsonify({
+            "error": "document_ids must be a list of document IDs."
+        }), 400
+    try:
+        selected_document_ids = sorted({int(item) for item in selected_document_ids})
+    except (TypeError, ValueError):
+        return jsonify({
+            "error": "document_ids must contain only integers."
+        }), 400
+
     # --------------------------------------------------
     # AUTHENTICATED USER
     # --------------------------------------------------
@@ -157,6 +174,15 @@ def ask():
             "error":
                 "User not found."
         }), 401
+
+    if selected_document_ids:
+        selected_documents = Document.query.filter(
+            Document.id.in_(selected_document_ids),
+            Document.status == "COMPLETED",
+        )
+        selected_document_ids = [
+            document.id for document in selected_documents.all()
+        ]
 
     # --------------------------------------------------
     # CONVERSATION OWNERSHIP
@@ -201,13 +227,14 @@ def ask():
                     )
                 ],
 
-                # IMPORTANT:
-                # Retrieval uses these values
-                # to enforce ownership.
+                # Retained as chat context for auditing. Completed documents
+                # are shared, so retrieval is status-based rather than owner-based.
                 "user_id": user.id,
 
                 "is_admin":
                     user.role == "ADMIN",
+
+                "selected_document_ids": selected_document_ids,
             },
             config=config
         )

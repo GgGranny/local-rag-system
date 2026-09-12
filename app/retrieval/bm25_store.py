@@ -1,6 +1,7 @@
 import re
 
 from rank_bm25 import BM25Okapi
+from sqlalchemy.orm import joinedload
 
 from app.models import (
     Document,
@@ -32,6 +33,10 @@ def build_bm25_index():
     query = (
         DocumentChunk.query
         .join(Document)
+        # BM25 keeps chunks in a process-level cache after this session ends.
+        # Load the parent document now so search_bm25 never triggers a lazy
+        # relationship lookup on a detached DocumentChunk instance.
+        .options(joinedload(DocumentChunk.document))
         .filter(
             Document.status == "COMPLETED"
         )
@@ -82,16 +87,9 @@ def search_bm25(
     k=5,
     user_id=None,
     is_admin=False,
+    document_ids=None,
 ):
-    """
-    Search BM25 while enforcing document ownership.
-
-    Normal user:
-        COMPLETED + uploaded_by == user_id
-
-    Admin:
-        COMPLETED documents from all users.
-    """
+    """Search completed documents in the shared knowledge base."""
 
     global _chunks
 
@@ -131,10 +129,6 @@ def search_bm25(
 
         chunk = _chunks[index]
 
-        # ----------------------------------------------
-        # OWNERSHIP CHECK
-        # ----------------------------------------------
-
         document = chunk.document
 
         if not document:
@@ -143,13 +137,8 @@ def search_bm25(
         if document.status != "COMPLETED":
             continue
 
-        if not is_admin:
-
-            if user_id is None:
-                continue
-
-            if document.uploaded_by != user_id:
-                continue
+        if document_ids and document.id not in document_ids:
+            continue
 
         # ----------------------------------------------
         # NORMALIZED RESULT

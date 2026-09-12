@@ -1,17 +1,19 @@
-{% extends "base.html" %}
+{% extends "admin/base.html" %}
 
 {% block title %}Admin Dashboard{% endblock %}
 
-{% block content %}
-<section class="create-user-section">
+{% block admin_content %}
+<section id="users" class="create-user-section">
 
     <h1>Admin Dashboard</h1>
 
-    <p>
-        Users: {{ users|length }} · Pending: {{ document_counts.PENDING }} ·
-        Processing: {{ document_counts.PROCESSING }} · Completed: {{ document_counts.COMPLETED }} ·
-        Failed: {{ document_counts.FAILED }}
-    </p>
+    <div class="admin-stats" aria-label="Application statistics">
+        <div class="stat-card"><span>Users</span><strong>{{ users|length }}</strong></div>
+        <div class="stat-card"><span>Pending</span><strong>{{ document_counts.PENDING }}</strong></div>
+        <div class="stat-card"><span>Processing</span><strong>{{ document_counts.PROCESSING }}</strong></div>
+        <div class="stat-card"><span>Completed</span><strong>{{ document_counts.COMPLETED }}</strong></div>
+        <div class="stat-card"><span>Failed</span><strong>{{ document_counts.FAILED }}</strong></div>
+    </div>
 
     <h2>Create User</h2>
 

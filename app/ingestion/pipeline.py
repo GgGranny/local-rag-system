@@ -115,8 +115,8 @@ def process_document(document_id: int):
             document_id=document.id,
             filename=document.filename,
 
-            # IMPORTANT:
-            # Store document owner in Chroma metadata.
+            # Retain uploader information for audit metadata. Retrieval access
+            # is based on COMPLETED status, not uploader ownership.
             user_id=document.uploaded_by,
         )
 
