@@ -31,55 +31,94 @@ from app.chat.llm import (
 
 
 # ======================================================
-# QUERY REWRITING
+# QUERY DECISION / REWRITING
 # ======================================================
+
+FOLLOW_UP_MARKERS = (
+    "\\bit\\b",
+    "\\bits\\b",
+    "\\bthey\\b",
+    "\\bthem\\b",
+    "\\btheir\\b",
+    "\\bthat\\b",
+    "\\bthose\\b",
+    "\\bprevious\\b",
+    "\\bthe previous\\b",
+    "\\bfirst (?:topic|point|example)\\b",
+    "\\bsecond (?:topic|point|example)\\b",
+    "\\blast (?:topic|point|example)\\b",
+    "\\bwhat about\\b",
+)
+
+
+def needs_conversation_rewrite(question: str) -> bool:
+    """Return true only for explicit conversational references.
+
+    History existing is not enough evidence that a question is a follow-up.
+    The deliberately small heuristic avoids a second LLM call for ordinary,
+    self-contained document questions while preserving rewriting for pronouns
+    and references such as "its", "that", or "the second point".
+    """
+    import re
+
+    normalized = " ".join(question.lower().split())
+    return any(re.search(marker, normalized) for marker in FOLLOW_UP_MARKERS)
+
+
+def decide_query(
+    state: RAGState,
+) -> RAGState:
+    messages = state.get("messages", [])
+    if not messages:
+        raise ValueError("No conversation messages found.")
+
+    original_query = messages[-1].content.strip()
+    if not original_query:
+        raise ValueError("Question cannot be empty.")
+
+    current_document_ids = sorted(state.get("selected_document_ids", []))
+    previous_document_ids = state.get("previous_selected_document_ids")
+    has_history = len(messages) > 1
+    # Older checkpoints do not have this field.  When history exists but its
+    # document scope is unknown, prefer a fresh retrieval context rather than
+    # risk rewriting with evidence from a prior selection.
+    document_context_changed = has_history and (
+        previous_document_ids is None
+        or sorted(previous_document_ids) != current_document_ids
+    )
+
+    # A different selection creates a new retrieval context.  Keep visible
+    # chat history, but never use its prior document evidence to expand the
+    # new query.
+    needs_rewrite = (
+        has_history
+        and not document_context_changed
+        and needs_conversation_rewrite(original_query)
+    )
+
+    print(f"[CHAT] Original query: {original_query}")
+    print(f"[CHAT] Previous documents: {previous_document_ids or []}")
+    print(f"[CHAT] Current documents: {current_document_ids}")
+    print(
+        "[CHAT] Query type: "
+        f"{'FOLLOW_UP' if needs_rewrite else 'INDEPENDENT'}"
+    )
+    print(f"[CHAT] Rewrite required: {needs_rewrite}")
+
+    return {
+        "original_query": original_query,
+        "query_for_retrieval": original_query,
+        "standalone_question": original_query,
+        "needs_rewrite": needs_rewrite,
+        "document_context_changed": document_context_changed,
+    }
 
 def rewrite_query(
     state: RAGState
 ) -> RAGState:
-
-    messages = state.get(
-        "messages",
-        []
-    )
-
-    if not messages:
-
-        raise ValueError(
-            "No conversation messages found."
-        )
-
-    current_question = (
-        messages[-1]
-        .content
-        .strip()
-    )
-
-    if not current_question:
-
-        raise ValueError(
-            "Question cannot be empty."
-        )
-
-    previous_messages = (
-        messages[:-1]
-    )
-
-    # --------------------------------------------------
-    # FIRST QUESTION
-    # --------------------------------------------------
-
-    if not previous_messages:
-
-        print(
-            f"[GRAPH] First question: "
-            f"{current_question}"
-        )
-
-        return {
-            "standalone_question":
-                current_question
-        }
+    messages = state.get("messages", [])
+    current_question = state["original_query"]
+    previous_messages = messages[:-1]
 
     # --------------------------------------------------
     # BUILD HISTORY
@@ -87,7 +126,9 @@ def rewrite_query(
 
     conversation = []
 
-    for message in previous_messages:
+    # Only the latest exchanges are relevant to a real follow-up.  This keeps
+    # a long conversation from becoming accidental document context.
+    for message in previous_messages[-6:]:
 
         role = (
             "User"
@@ -155,12 +196,13 @@ Standalone retrieval question:
         "[GRAPH] Rewriting follow-up question..."
     )
 
-    standalone_question = (
-        generate_answer(
-            prompt
-        )
-        .strip()
-    )
+    standalone_question = generate_answer(prompt).strip()
+
+    # A failed/local model response must not turn a valid short follow-up
+    # into an empty retrieval query.  The original question remains the
+    # safest retrieval query in that case.
+    if not standalone_question:
+        standalone_question = current_question
 
     print(
         f"[GRAPH] Standalone question: "
@@ -168,9 +210,13 @@ Standalone retrieval question:
     )
 
     return {
-        "standalone_question":
-            standalone_question
+        "standalone_question": standalone_question,
+        "query_for_retrieval": standalone_question,
     }
+
+
+def route_after_query_decision(state: RAGState) -> str:
+    return "rewrite_query" if state.get("needs_rewrite") else "retrieve"
 
 
 # ======================================================
@@ -181,9 +227,7 @@ def retrieve(
     state: RAGState
 ) -> RAGState:
 
-    question = state[
-        "standalone_question"
-    ]
+    question = state.get("query_for_retrieval") or state["original_query"]
 
     user_id = state.get(
         "user_id"
@@ -203,6 +247,7 @@ def retrieve(
         f"[GRAPH] Retrieving: "
         f"{question}"
     )
+    print(f"[CHAT] Retrieval document IDs: {selected_document_ids}")
 
     print(
         f"[GRAPH] User ID: "
@@ -305,6 +350,10 @@ def generate_answer_node(
                     content=answer
                 )
             ],
+
+            "previous_selected_document_ids": list(
+                state.get("selected_document_ids", [])
+            ),
         }
 
     # --------------------------------------------------
@@ -388,6 +437,10 @@ def generate_answer_node(
                 content=answer
             )
         ],
+
+        "previous_selected_document_ids": list(
+            state.get("selected_document_ids", [])
+        ),
     }
 
 
@@ -401,10 +454,8 @@ def build_graph():
         RAGState
     )
 
-    builder.add_node(
-        "rewrite_query",
-        rewrite_query
-    )
+    builder.add_node("decide_query", decide_query)
+    builder.add_node("rewrite_query", rewrite_query)
 
     builder.add_node(
         "retrieve",
@@ -423,13 +474,19 @@ def build_graph():
 
     builder.add_edge(
         START,
-        "rewrite_query"
+        "decide_query"
     )
 
-    builder.add_edge(
-        "rewrite_query",
-        "retrieve"
+    builder.add_conditional_edges(
+        "decide_query",
+        route_after_query_decision,
+        {
+            "rewrite_query": "rewrite_query",
+            "retrieve": "retrieve",
+        },
     )
+
+    builder.add_edge("rewrite_query", "retrieve")
 
     builder.add_edge(
         "retrieve",

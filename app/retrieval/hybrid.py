@@ -31,7 +31,7 @@ def normalize_scores(results):
 
             result["normalized_score"] = (
                 1.0
-                if maximum > 0
+                if maximum != 0
                 else 0.0
             )
 
@@ -302,11 +302,17 @@ def serialize_retrieval_results(
             "document"
         ]
 
+        # Vector results use LangChain Documents while BM25 results use
+        # already-serialized dictionaries.  Treat both as data, never as
+        # ORM instances: this value is persisted in LangGraph checkpoints.
+        if isinstance(document, dict):
+            content = document.get("page_content", document.get("content", ""))
+            metadata = document.get("metadata", document)
+
         # --------------------------------------------------
         # LangChain Document
         # --------------------------------------------------
-
-        if hasattr(
+        elif hasattr(
             document,
             "page_content"
         ):
@@ -322,7 +328,8 @@ def serialize_retrieval_results(
             )
 
         # --------------------------------------------------
-        # SQLAlchemy DocumentChunk
+        # Compatibility for direct callers that still pass a SQLAlchemy
+        # chunk.  Retrieval itself deliberately does not cache ORM objects.
         # --------------------------------------------------
 
         else:

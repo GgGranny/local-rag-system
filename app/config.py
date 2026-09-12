@@ -95,3 +95,10 @@ class Config:
     "OLLAMA_CHAT_MODEL",
     "qwen3:1.7b"
 )
+
+    # Applies to both grounded answers and the lightweight rewrite call.  A
+    # failed local model must return control to the Flask request instead of
+    # leaving the chat UI generating indefinitely.
+    OLLAMA_REQUEST_TIMEOUT = float(
+        os.getenv("OLLAMA_REQUEST_TIMEOUT", "120")
+    )

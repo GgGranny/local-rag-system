@@ -18,6 +18,9 @@ def get_llm():
         _llm = ChatOllama(
             model=Config.OLLAMA_CHAT_MODEL,
             temperature=0.3,
+            client_kwargs={
+                "timeout": Config.OLLAMA_REQUEST_TIMEOUT,
+            },
         )
     return _llm
 

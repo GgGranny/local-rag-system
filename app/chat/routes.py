@@ -179,10 +179,12 @@ def ask():
         selected_documents = Document.query.filter(
             Document.id.in_(selected_document_ids),
             Document.status == "COMPLETED",
-        )
-        selected_document_ids = [
-            document.id for document in selected_documents.all()
-        ]
+        ).all()
+        valid_document_ids = {document.id for document in selected_documents}
+        if valid_document_ids != set(selected_document_ids):
+            return jsonify({
+                "error": "Every selected document must exist and be completed."
+            }), 400
 
     # --------------------------------------------------
     # CONVERSATION OWNERSHIP

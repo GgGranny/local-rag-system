@@ -22,6 +22,11 @@ class RAGState(
 
     selected_document_ids: list[int]
 
+    # The previous completed turn's selection.  This is retrieval context,
+    # not chat history, and is deliberately only primitive data so it is safe
+    # for the LangGraph checkpoint.
+    previous_selected_document_ids: list[int]
+
     # --------------------------------------------------
     # CONVERSATION MEMORY
     # --------------------------------------------------
@@ -36,6 +41,14 @@ class RAGState(
     # --------------------------------------------------
 
     standalone_question: str
+
+    original_query: str
+
+    query_for_retrieval: str
+
+    needs_rewrite: bool
+
+    document_context_changed: bool
 
     # --------------------------------------------------
     # SERIALIZABLE RETRIEVAL RESULTS
