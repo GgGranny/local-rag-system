@@ -10,12 +10,20 @@ from flask import (
     flash,
     current_app,
     jsonify,
+    send_file,
+    url_for,
 )
 from werkzeug.utils import secure_filename
 from app.auth.decorators import login_required
 from sqlalchemy import or_
 from app.extensions import db
-from app.models import Document, DocumentChunk, User
+from app.models import (
+    Document,
+    DocumentChunk,
+    DocumentImage,
+    DocumentSourcePage,
+    User,
+)
 from app.ingestion.pipeline import process_document
 
 
@@ -200,10 +208,41 @@ def get_document_source(document_id):
         .order_by(DocumentChunk.page_number, DocumentChunk.chunk_index)
         .all()
     )
+    images = (
+        DocumentImage.query
+        .filter_by(document_id=document.id)
+        .order_by(DocumentImage.page_number, DocumentImage.vertical_position, DocumentImage.image_index)
+        .all()
+    )
+    source_pages = (
+        DocumentSourcePage.query
+        .filter_by(document_id=document.id)
+        .order_by(DocumentSourcePage.page_number)
+        .all()
+    )
 
     return jsonify({
         "document_id": document.id,
         "filename": document.filename,
+        "images": [
+            {
+                "image_id": image.image_id,
+                "page_number": image.page_number,
+                "image_index": image.image_index,
+                "vertical_position": image.vertical_position,
+                "source_kind": image.source_kind,
+                "url": url_for("documents.get_source_image", image_id=image.image_id),
+            }
+            for image in images
+        ],
+        "pages": [
+            {
+                "page_number": page.page_number,
+                "content": page.content,
+                "extraction_method": page.extraction_method,
+            }
+            for page in source_pages
+        ],
         "chunks": [
             {
                 "chunk_id": chunk.chunk_id,
@@ -216,6 +255,22 @@ def get_document_source(document_id):
             for chunk in chunks
         ],
     })
+
+
+@documents_bp.route("/images/<string:image_id>", methods=["GET"])
+@login_required
+def get_source_image(image_id):
+    """Serve a preserved source visual only after document access validation."""
+    image = DocumentImage.query.filter_by(image_id=image_id).first()
+    if not image or image.document.status != "COMPLETED":
+        return jsonify({"error": "Source image not found."}), 404
+
+    image_path = Path(current_app.config["SOURCE_IMAGE_FOLDER"]) / image.stored_filename
+    if not image_path.is_file():
+        current_app.logger.warning("[DOCUMENT] Missing source image %s", image_id)
+        return jsonify({"error": "Source image not found."}), 404
+
+    return send_file(image_path, mimetype=image.mime_type, conditional=True)
 
 
 @documents_bp.route("/mine", methods=["GET"])

@@ -146,21 +146,135 @@ function appendSourceText(container, text) {
     });
 }
 
-function renderSourceDocument(sourceDocument, citedChunkId, citation) {
+function sourceLines(text) {
+    return String(text || "").split(/\n+/).map((line) => line.trim()).filter(Boolean);
+}
+
+function appendSemanticLine(container, line) {
+    const bullet = line.match(/^[-*•]\s+(.+)/);
+    const numbered = line.match(/^\d+[.)]\s+(.+)/);
+    if (bullet || numbered) {
+        const list = document.createElement(numbered ? "ol" : "ul");
+        const item = document.createElement("li");
+        item.textContent = (bullet || numbered)[1];
+        list.appendChild(item); container.appendChild(list); return item;
+    }
+    const element = document.createElement(line.length < 100 && /[:.]$/.test(line) ? "h3" : "p");
+    element.textContent = line; container.appendChild(element); return element;
+}
+
+function appendSourceImages(container, images, citedImageId) {
+    images.forEach((image) => {
+        const figure = document.createElement("figure");
+        figure.className = "source-image";
+        figure.id = `source-image-${image.image_id}`;
+        if (image.image_id === citedImageId) figure.classList.add("is-cited-image");
+        const element = document.createElement("img");
+        element.src = image.url;
+        element.alt = image.source_kind === "ocr_page" ? "OCR source page" : "Source document figure";
+        element.loading = "lazy";
+        figure.appendChild(element);
+        if (image.source_kind === "ocr_page") { const caption = document.createElement("figcaption"); caption.textContent = "Source page used for OCR"; figure.appendChild(caption); }
+        container.appendChild(figure);
+    });
+}
+
+function markCitedText(container, chunkId, chunkContent) {
+    const firstLine = sourceLines(chunkContent).find((line) => line.length >= 16) || "";
+    const candidate = firstLine.slice(0, 80).replace(/\s+/g, " ");
+    const elements = container.querySelectorAll("p,h1,h2,h3,h4,h5,h6,li");
+    const target = [...elements].find((element) => element.textContent.replace(/\s+/g, " ").includes(candidate));
+    if (target) {
+        target.id = `source-chunk-${chunkId}`;
+        target.classList.add("is-cited");
+        return target;
+    }
+    return null;
+}
+
+function renderSourcePage(container, page, images, citedChunk) {
+    // This is a structural section only, never a visual PDF page/card.
+    const pageContent = document.createElement("section");
+    pageContent.className = "source-content";
+    const lines = sourceLines(page.content);
+    const positionedImages = [...images].sort((a, b) => (a.vertical_position ?? 1) - (b.vertical_position ?? 1));
+    let imageCursor = 0;
+    lines.forEach((line, index) => {
+        while (
+            imageCursor < positionedImages.length
+            && (positionedImages[imageCursor].vertical_position ?? 1) <= index / Math.max(lines.length, 1)
+        ) {
+            appendSourceImages(pageContent, [positionedImages[imageCursor]], null);
+            imageCursor += 1;
+        }
+        appendSemanticLine(pageContent, line);
+    });
+    while (imageCursor < positionedImages.length) {
+        appendSourceImages(pageContent, [positionedImages[imageCursor]], null);
+        imageCursor += 1;
+    }
+    if (!lines.length && !positionedImages.length) appendSourceText(pageContent, page.content);
+    container.appendChild(pageContent);
+
+    if (citedChunk) {
+        const target = markCitedText(pageContent, citedChunk.chunk_id, citedChunk.content);
+        if (!target) {
+            pageContent.id = `source-chunk-${citedChunk.chunk_id}`;
+            pageContent.classList.add("is-cited");
+        }
+    }
+    if (["ocr", "paddleocr"].includes(page.extraction_method)) {
+        const note = document.createElement("p"); note.className = "source-ocr-note";
+        note.textContent = "Text extracted with OCR"; container.appendChild(note);
+    }
+}
+
+function renderSourceDocument(sourceDocument, citedChunkId, citation, citedImageId = null) {
     const list = byId("source-list"); list.replaceChildren();
     byId("source-title").textContent = sourceDocument.filename || "Source document";
     const cited = sourceDocument.chunks.find((chunk) => chunk.chunk_id === citedChunkId);
     byId("source-meta").textContent = `${citation || "Source"}${cited?.page_number ? ` · page ${cited.page_number}` : ""}${cited?.extraction_method ? ` · ${cited.extraction_method}` : ""}`;
-    sourceDocument.chunks.forEach((chunk) => {
+    const imagesByPage = new Map();
+    (sourceDocument.images || []).forEach((image) => {
+        const pageImages = imagesByPage.get(image.page_number) || [];
+        pageImages.push(image); imagesByPage.set(image.page_number, pageImages);
+    });
+    // New ingestions retain canonical page text.  Unlike chunk rendering, it
+    // has no splitter overlap and lets images sit near their source position.
+    if (sourceDocument.pages?.length) {
+        sourceDocument.pages.forEach((page) => {
+            const block = document.createElement("article");
+            block.className = "source-block";
+            const citedOnPage = cited?.page_number === page.page_number ? cited : null;
+            renderSourcePage(block, page, imagesByPage.get(page.page_number) || [], citedOnPage);
+            list.appendChild(block);
+        });
+        if (citedImageId) {
+            const imageTarget = byId(`source-image-${citedImageId}`);
+            imageTarget?.classList.add("is-cited-image");
+        }
+        const targetId = citedImageId ? `source-image-${citedImageId}` : `source-chunk-${citedChunkId}`;
+        byId(targetId)?.scrollIntoView({ behavior: "smooth", block: "center" });
+        return;
+    }
+
+    // Documents ingested before page-source preservation retain the legacy
+    // chunk fallback; reprocess them to get image placement in reading order.
+    sourceDocument.chunks.forEach((chunk, index) => {
         const block = document.createElement("article");
         block.className = "source-block"; block.id = `source-chunk-${chunk.chunk_id}`;
         if (chunk.chunk_id === citedChunkId) block.classList.add("is-cited");
         const content = document.createElement("div"); content.className = "source-content";
         appendSourceText(content, chunk.content); block.appendChild(content);
-        if (chunk.extraction_method === "paddleocr") { const note = document.createElement("p"); note.className = "source-ocr-note"; note.textContent = "Extracted with OCR"; block.appendChild(note); }
+        if (["ocr", "paddleocr"].includes(chunk.extraction_method)) { const note = document.createElement("p"); note.className = "source-ocr-note"; note.textContent = "Extracted with OCR"; block.appendChild(note); }
         list.appendChild(block);
+        const nextChunk = sourceDocument.chunks[index + 1];
+        if (!nextChunk || nextChunk.page_number !== chunk.page_number) {
+            appendSourceImages(list, imagesByPage.get(chunk.page_number) || [], citedImageId);
+        }
     });
-    byId(`source-chunk-${citedChunkId}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+    const targetId = citedImageId ? `source-image-${citedImageId}` : `source-chunk-${citedChunkId}`;
+    byId(targetId)?.scrollIntoView({ behavior: "smooth", block: "center" });
 }
 
 function showSourceLoading(source) {
@@ -176,7 +290,7 @@ async function showSource(source) {
         const result = await response.json();
         if (!response.ok) throw new Error(result.error || "Unable to load this source.");
         if (requestId !== sourceRequestId) return;
-        renderSourceDocument(result, source.chunk_id, source.citation);
+        renderSourceDocument(result, source.chunk_id, source.citation, source.image_id || null);
     } catch (error) {
         if (requestId !== sourceRequestId) return;
         byId("source-meta").textContent = "Source unavailable"; byId("source-list").replaceChildren();

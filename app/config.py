@@ -24,6 +24,9 @@ UPLOAD_DIR.mkdir(
     exist_ok=True
 )
 
+SOURCE_IMAGE_DIR = DATA_DIR / "source_images"
+SOURCE_IMAGE_DIR.mkdir(parents=True, exist_ok=True)
+
 CHROMA_DIR = BASE_DIR / "data" / "chroma_db"
 CHROMA_DIR.mkdir(
     parents=True,
@@ -50,6 +53,7 @@ def get_database_uri() -> str:
 class Config:
 
     UPLOAD_FOLDER = str(UPLOAD_DIR)
+    SOURCE_IMAGE_FOLDER = str(SOURCE_IMAGE_DIR)
 
     MAX_CONTENT_LENGTH = 20 * 1024 * 1024
     

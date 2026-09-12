@@ -216,6 +216,43 @@ def numpy_image_from_pixmap(pixmap) -> np.ndarray:
         return np.array([])
 
 
+def extract_page_images(pdf, page, page_number: int) -> list[dict]:
+    """Extract browser-safe embedded visuals and retain page placement data."""
+    images = []
+    seen_xrefs = set()
+    for image_index, image_info in enumerate(page.get_images(full=True)):
+        xref = image_info[0]
+        if xref in seen_xrefs:
+            continue
+        seen_xrefs.add(xref)
+        try:
+            extracted = pdf.extract_image(xref)
+            extension = extracted.get("ext", "png").lower()
+            image_data = extracted["image"]
+            if extension not in {"png", "jpg", "jpeg", "gif", "webp"}:
+                pixmap = fitz.Pixmap(pdf, xref)
+                image_data = pixmap.tobytes("png")
+                extension = "png"
+            rects = page.get_image_rects(xref)
+            images.append({
+                "data": image_data,
+                "extension": extension,
+                "page_number": page_number,
+                "image_index": image_index,
+                # A normalized coordinate remains meaningful in the source
+                # viewer without exposing PDF page geometry to the browser.
+                "vertical_position": (
+                    float(rects[0].y0 / page.rect.height)
+                    if rects and page.rect.height
+                    else None
+                ),
+                "source_kind": "embedded",
+            })
+        except Exception as exc:
+            logger.warning("[PDF] Could not extract image on page %s: %s", page_number, exc)
+    return images
+
+
 def extract_pdf_pages(
     file_path: str,
     min_text_length: int = 30
@@ -274,6 +311,18 @@ def extract_pdf_pages(
                     "page_number": ocr_result["page_number"],
                     "text": ocr_result["text"],
                     "extraction_method": ocr_result["extraction_method"],
+                    # Keep the rendered source page beside OCR text.  The UI
+                    # can show it, but must not pretend to pixel-highlight it.
+                    "images": [{
+                        "data": page.get_pixmap(
+                            matrix=fitz.Matrix(1.5, 1.5), alpha=False
+                        ).tobytes("png"),
+                        "extension": "png",
+                        "page_number": page_number,
+                        "image_index": 0,
+                        "vertical_position": 0.0,
+                        "source_kind": "ocr_page",
+                    }],
                 })
 
                 if not ocr_result["text"].strip():
@@ -287,6 +336,7 @@ def extract_pdf_pages(
                     "page_number": page_number,
                     "text": native_text,
                     "extraction_method": "pymupdf",
+                    "images": extract_page_images(pdf, page, page_number),
                 })
 
                 logger.info(
