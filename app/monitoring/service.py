@@ -96,8 +96,8 @@ class TraceExecution:
         try:
             completed_at = datetime.utcnow()
             total_ms = (time.perf_counter() - self.started_perf) * 1000
-            prompt = self.data.get("prompt") if Config.PHOENIX_CAPTURE_PROMPTS else None
-            context = self.data.get("context") if Config.PHOENIX_CAPTURE_RETRIEVED_CONTEXT else None
+            prompt = self.data.get("prompt") if Config.MONITORING_STORE_PROMPTS else None
+            context = self.data.get("context") if Config.MONITORING_STORE_CONTEXT else None
             prompt_tokens = self.data.get("prompt_tokens")
             completion_tokens = self.data.get("completion_tokens")
             estimated_cost = None
@@ -114,11 +114,11 @@ class TraceExecution:
                 query_type=self.data.get("query_type"),
                 rewrite_used=bool(self.data.get("rewrite_used")),
                 selected_document_ids_json=_safe_json(self.selected_document_ids),
-                original_query=self.question if Config.PHOENIX_CAPTURE_CONTENT else None,
-                retrieval_query=self.data.get("retrieval_query") if Config.PHOENIX_CAPTURE_CONTENT else None,
-                retrieved_chunks_json=_safe_json(self.data["retrieved_chunks"]) if Config.PHOENIX_CAPTURE_RETRIEVED_CONTEXT else None,
+                original_query=self.question if Config.MONITORING_STORE_CONTENT else None,
+                retrieval_query=self.data.get("retrieval_query") if Config.MONITORING_STORE_CONTENT else None,
+                retrieved_chunks_json=_safe_json(self.data["retrieved_chunks"]) if Config.MONITORING_STORE_CONTEXT else None,
                 context_text=context, prompt_text=prompt,
-                answer_text=self.data.get("answer") if Config.PHOENIX_CAPTURE_CONTENT else None,
+                answer_text=self.data.get("answer") if Config.MONITORING_STORE_CONTENT else None,
                 citations_json=_safe_json(self.data["citations"]),
                 stage_timings_json=_safe_json(self.stage_timings),
                 model_name=Config.OLLAMA_CHAT_MODEL,

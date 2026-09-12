@@ -40,10 +40,27 @@ def generate_answer(
     response = llm.invoke(prompt)
     metadata = getattr(response, "response_metadata", {}) or {}
     usage = metadata.get("usage") or metadata.get("usage_metadata") or {}
+    # Ollama's native response metadata uses prompt_eval_count/eval_count;
+    # newer wrappers may instead expose a usage mapping.
+    prompt_tokens = (
+        usage.get("prompt_tokens")
+        or usage.get("input_tokens")
+        or metadata.get("prompt_eval_count")
+    )
+    completion_tokens = (
+        usage.get("completion_tokens")
+        or usage.get("output_tokens")
+        or metadata.get("eval_count")
+    )
     record(
         prompt=prompt,
-        prompt_tokens=usage.get("prompt_tokens") or usage.get("input_tokens"),
-        completion_tokens=usage.get("completion_tokens") or usage.get("output_tokens"),
+        prompt_tokens=prompt_tokens,
+        completion_tokens=completion_tokens,
         token_estimated=False,
+        generation_metadata={
+            "stop_reason": metadata.get("done_reason"),
+            "total_duration_ns": metadata.get("total_duration"),
+            "eval_duration_ns": metadata.get("eval_duration"),
+        },
     )
     return response.content

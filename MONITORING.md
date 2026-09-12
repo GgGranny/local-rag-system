@@ -13,6 +13,9 @@ PHOENIX_PROJECT_NAME=local-rag
 PHOENIX_CAPTURE_CONTENT=false
 PHOENIX_CAPTURE_RETRIEVED_CONTEXT=false
 PHOENIX_CAPTURE_PROMPTS=false
+MONITORING_STORE_CONTENT=false
+MONITORING_STORE_CONTEXT=false
+MONITORING_STORE_PROMPTS=false
 RAGAS_AUTO_EVALUATION_ENABLED=false
 RAG_GROUNDEDNESS_THRESHOLD=0.7
 OLLAMA_INPUT_COST_PER_1K_TOKENS=0
@@ -23,13 +26,13 @@ To export to Arize Phoenix, install Phoenix and its OpenTelemetry integration in
 
 ## Data and privacy
 
-`rag_traces` stores trace metadata, timings, result status, citations, and optional content. Full questions/answers require `PHOENIX_CAPTURE_CONTENT`; retrieved chunks/context require `PHOENIX_CAPTURE_RETRIEVED_CONTEXT`; prompts require `PHOENIX_CAPTURE_PROMPTS`. Do not enable these values where the stored data would violate your local privacy policy.
+`rag_traces` stores trace metadata, timings, result status, citations, and optional content. Full questions/answers require `MONITORING_STORE_CONTENT`; retrieved chunks/context require `MONITORING_STORE_CONTEXT`; prompts require `MONITORING_STORE_PROMPTS`. The equivalent `PHOENIX_CAPTURE_*` settings remain backward-compatible defaults. Do not enable these values where the stored data would violate your local privacy policy.
 
 The trace captures the request, query classification, optional rewrite, retrieval, context build, prompt build, generation, citation construction, and persistence timings. Token counts are stored only when the installed Ollama integration reports them. Costs are configured estimates, not local-inference bills.
 
 ## Evaluation
 
-The UI distinguishes evaluated and unevaluated traces. This repository currently contains no RAGAS runner or compatible RAGAS dependency, so automatic RAGAS evaluation remains disabled and no heuristic is presented as a RAGAS score. `rag_evaluations` is available for a compatible offline/manual evaluator to persist faithfulness, relevance, context precision/recall, and correctness results.
+The UI distinguishes evaluated and unevaluated traces. RAGAS 0.4.3 is installed, but its modern faithfulness metric requires an instructor-compatible evaluator. The existing local `ChatOllama` integration is not that adapter, so automatic RAGAS evaluation remains disabled rather than emitting fabricated scores. `rag_evaluations` is available for a compatible local/offline evaluator to persist faithfulness, relevance, context precision/recall, and correctness results.
 
 ## Verification
 

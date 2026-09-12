@@ -3,7 +3,26 @@ import math
 from collections import Counter, defaultdict
 from datetime import datetime, timedelta
 
+from app.config import Config
 from app.models import RAGTrace
+
+
+STAGE_DISPLAY = {
+    "rag.request": ("Total request", "End-to-end request handling."),
+    "rag.query.classification": ("Understand the question", "Determines whether the question is independent or a follow-up."),
+    "rag.query.rewrite": ("Rewrite follow-up question", "Reformulates a follow-up for document retrieval."),
+    "rag.retrieval": ("Search relevant documents", "Retrieves chunks from the shared completed-document knowledge base."),
+    "rag.context.build": ("Prepare source context", "Builds the source context sent to the model."),
+    "rag.prompt.build": ("Build model prompt", "Builds the grounded Ollama prompt."),
+    "rag.generation": ("Generate answer", "Runs the local Ollama model."),
+    "rag.citations": ("Prepare citations", "Maps returned chunks to citation metadata."),
+    "rag.persistence": ("Save response", "Persists the conversation update."),
+}
+
+
+def display_stage(name: str) -> dict:
+    label, description = STAGE_DISPLAY.get(name, (name, "Recorded monitoring stage."))
+    return {"internal_name": name, "label": label, "description": description}
 
 
 def parse_window(value: str | None) -> timedelta:
@@ -20,6 +39,17 @@ def percentile(values, point):
     if lower == upper:
         return round(values[lower], 2)
     return round(values[lower] + (values[upper] - values[lower]) * (position - lower), 2)
+
+
+def _availability(value, enabled: bool, *, applicable: bool = True):
+    """Make privacy and missing-data states distinguishable to the UI."""
+    if not applicable:
+        return {"available": False, "reason": "not_applicable", "value": None}
+    if value is not None:
+        return {"available": True, "reason": None, "value": value}
+    if not enabled:
+        return {"available": False, "reason": "privacy_disabled", "value": None}
+    return {"available": False, "reason": "not_collected", "value": None}
 
 
 def trace_payload(trace: RAGTrace, include_content=False):
@@ -45,13 +75,32 @@ def trace_payload(trace: RAGTrace, include_content=False):
         "token_estimated": trace.token_estimated,
         "estimated_cost": trace.estimated_cost,
     }
+    data["stages"] = [
+        {**display_stage(name), "duration_ms": duration}
+        for name, duration in data["stage_timings"].items()
+        if isinstance(duration, (int, float))
+    ]
+    data["tokens"] = {
+        "prompt": _availability(trace.prompt_tokens, True),
+        "completion": _availability(trace.completion_tokens, True),
+        "total": _availability(
+            (trace.prompt_tokens or 0) + (trace.completion_tokens or 0)
+            if trace.prompt_tokens is not None or trace.completion_tokens is not None else None,
+            True,
+        ),
+        "estimated": trace.token_estimated,
+    }
     if include_content:
         data.update({
-            "original_query": trace.original_query,
-            "retrieval_query": trace.retrieval_query,
-            "retrieved_chunks": load(trace.retrieved_chunks_json, "[]"),
-            "context": trace.context_text, "prompt": trace.prompt_text,
-            "answer": trace.answer_text,
+            "original_query": _availability(trace.original_query, Config.MONITORING_STORE_CONTENT),
+            "retrieval_query": _availability(trace.retrieval_query, Config.MONITORING_STORE_CONTENT),
+            "retrieved_chunks": _availability(
+                load(trace.retrieved_chunks_json, "[]") if trace.retrieved_chunks_json is not None else None,
+                Config.MONITORING_STORE_CONTEXT,
+            ),
+            "context": _availability(trace.context_text, Config.MONITORING_STORE_CONTEXT),
+            "prompt": _availability(trace.prompt_text, Config.MONITORING_STORE_PROMPTS),
+            "answer": _availability(trace.answer_text, Config.MONITORING_STORE_CONTENT),
             "citations": load(trace.citations_json, "[]"),
         })
     return data
@@ -82,7 +131,7 @@ def overview(window: timedelta):
                     "max": max(latencies) if latencies else None},
         "errors_by_stage": dict(errors),
         "requests_over_time": [{"time": key, "count": value} for key, value in sorted(buckets.items())],
-        "stages": [{"name": name, "average_ms": round(sum(values) / len(values), 2),
+        "stages": [{**display_stage(name), "average_ms": round(sum(values) / len(values), 2),
                     "p50_ms": percentile(values, .5), "p95_ms": percentile(values, .95),
                     "count": len(values)} for name, values in stage_values.items()],
     }

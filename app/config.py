@@ -114,6 +114,17 @@ class Config:
     PHOENIX_CAPTURE_CONTENT = os.getenv("PHOENIX_CAPTURE_CONTENT", "false").lower() == "true"
     PHOENIX_CAPTURE_RETRIEVED_CONTEXT = os.getenv("PHOENIX_CAPTURE_RETRIEVED_CONTEXT", "false").lower() == "true"
     PHOENIX_CAPTURE_PROMPTS = os.getenv("PHOENIX_CAPTURE_PROMPTS", "false").lower() == "true"
+    # These aliases describe application-database retention separately from
+    # Phoenix export.  Existing PHOENIX_CAPTURE_* values remain compatible.
+    MONITORING_STORE_CONTENT = os.getenv(
+        "MONITORING_STORE_CONTENT", os.getenv("PHOENIX_CAPTURE_CONTENT", "false")
+    ).lower() == "true"
+    MONITORING_STORE_CONTEXT = os.getenv(
+        "MONITORING_STORE_CONTEXT", os.getenv("PHOENIX_CAPTURE_RETRIEVED_CONTEXT", "false")
+    ).lower() == "true"
+    MONITORING_STORE_PROMPTS = os.getenv(
+        "MONITORING_STORE_PROMPTS", os.getenv("PHOENIX_CAPTURE_PROMPTS", "false")
+    ).lower() == "true"
     RAGAS_AUTO_EVALUATION_ENABLED = os.getenv("RAGAS_AUTO_EVALUATION_ENABLED", "false").lower() == "true"
     RAG_GROUNDEDNESS_THRESHOLD = float(os.getenv("RAG_GROUNDEDNESS_THRESHOLD", "0.7"))
     OLLAMA_INPUT_COST_PER_1K_TOKENS = float(os.getenv("OLLAMA_INPUT_COST_PER_1K_TOKENS", "0"))

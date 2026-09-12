@@ -6,6 +6,7 @@ from flask import Blueprint, jsonify, render_template, request
 from sqlalchemy.orm import joinedload
 
 from app.auth.decorators import admin_required
+from app.config import Config
 from app.extensions import db
 from app.models import Conversation, RAGEvaluation, RAGTrace, User
 from app.monitoring.metrics import overview, parse_window, trace_payload
@@ -39,6 +40,15 @@ def dashboard():
     return render_template("admin/monitoring.html")
 
 
+@monitoring_bp.route("/traces/<string:trace_id>", methods=["GET"])
+@admin_required
+def trace_detail(trace_id):
+    # Resolve on the server so an invalid URL is a real 404 rather than a
+    # blank client-side panel.
+    trace = RAGTrace.query.filter_by(trace_id=trace_id).first_or_404()
+    return render_template("admin/trace_detail.html", trace=trace)
+
+
 @monitoring_bp.route("/api/overview", methods=["GET"])
 @admin_required
 def api_overview():
@@ -54,10 +64,18 @@ def api_overview():
         "average_faithfulness": round(sum(faithfulness) / len(faithfulness), 3) if faithfulness else None,
         "average_answer_relevance": round(sum(relevance) / len(relevance), 3) if relevance else None,
     }
+    since = datetime.utcnow() - window
+    traces = RAGTrace.query.filter(RAGTrace.started_at >= since).all()
+    reported = [item for item in traces if item.prompt_tokens is not None or item.completion_tokens is not None]
     payload["token_usage"] = {
-        "prompt_tokens": sum(item.prompt_tokens or 0 for item in RAGTrace.query.all()),
-        "completion_tokens": sum(item.completion_tokens or 0 for item in RAGTrace.query.all()),
-        "estimated_cost": round(sum(item.estimated_cost or 0 for item in RAGTrace.query.all()), 6),
+        "prompt_tokens": sum(item.prompt_tokens or 0 for item in reported) if reported else None,
+        "completion_tokens": sum(item.completion_tokens or 0 for item in reported) if reported else None,
+        "reported_trace_count": len(reported),
+        "unknown_trace_count": len(traces) - len(reported),
+        "estimated_cost": round(sum(item.estimated_cost or 0 for item in reported), 6) if reported else None,
+        "cost_rate_configured": bool(
+            Config.OLLAMA_INPUT_COST_PER_1K_TOKENS or Config.OLLAMA_OUTPUT_COST_PER_1K_TOKENS
+        ),
     }
     return jsonify(payload)
 
@@ -73,7 +91,10 @@ def api_traces():
     if status in {"SUCCESS", "FAILED", "RUNNING"}:
         query = query.filter_by(status=status)
     result = query.paginate(page=page, per_page=per_page, error_out=False)
-    return jsonify({"items": [trace_payload(item) for item in result.items], "page": page,
+    items = [trace_payload(item) for item in result.items]
+    for item in items:
+        item["detail_url"] = request.url_root.rstrip("/") + "/admin/monitoring/traces/" + item["trace_id"]
+    return jsonify({"items": items, "page": page,
                     "per_page": per_page, "total": result.total, "pages": result.pages})
 
 
