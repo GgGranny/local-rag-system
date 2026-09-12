@@ -92,9 +92,7 @@
                                     {{ document.uploader.username }}
                                 </td>
 
-                                <td>
-                                    {{ document.status }}
-                                </td>
+                                <td><span class="status-badge status-{{ document.status|lower }}">{{ document.status }}</span></td>
 
                                 <td>
                                     {{
@@ -119,7 +117,7 @@
                                             style="display:inline;"
                                         >
 
-                                            <button type="submit">
+                                            <button class="table-action approve-action" type="submit">
                                                 Approve
                                             </button>
 
@@ -137,7 +135,7 @@
                                             style="display:inline;"
                                         >
 
-                                            <button type="submit">
+                                            <button class="table-action destructive" type="submit">
                                                 Reject
                                             </button>
 
@@ -150,7 +148,7 @@
                                             action="{{ url_for('admin.reprocess_document', document_id=document.id) }}"
                                             style="display:inline;"
                                         >
-                                            <button type="submit">Reprocess</button>
+                                            <button class="table-action" type="submit">Reprocess</button>
                                         </form>
 
                                     {% else %}

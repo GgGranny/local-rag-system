@@ -15,7 +15,7 @@ from werkzeug.utils import secure_filename
 from app.auth.decorators import login_required
 from sqlalchemy import or_
 from app.extensions import db
-from app.models import Document, User
+from app.models import Document, DocumentChunk, User
 from app.ingestion.pipeline import process_document
 
 
@@ -159,8 +159,6 @@ def upload():
 @login_required
 def get_chunk(chunk_id):
     """Return a cited source from the shared completed knowledge base."""
-    from app.models import DocumentChunk
-
     chunk = DocumentChunk.query.filter_by(chunk_id=chunk_id).first()
     if not chunk:
         return jsonify({"error": "Source not found."}), 404
@@ -180,6 +178,43 @@ def get_chunk(chunk_id):
         "content": chunk.content,
         "extraction_method": chunk.extraction_method,
         "content_type": chunk.content_type,
+    })
+
+
+@documents_bp.route("/<int:document_id>/source", methods=["GET"])
+@login_required
+def get_document_source(document_id):
+    """Return a completed document's ordered source chunks for the viewer.
+
+    The viewer uses this only to build a continuous HTML representation.  It
+    intentionally exposes no filesystem path or original uploaded file.
+    Completed documents follow the application's shared-RAG access rule.
+    """
+    document = db.session.get(Document, document_id)
+    if not document or document.status != "COMPLETED":
+        return jsonify({"error": "Source not found."}), 404
+
+    chunks = (
+        DocumentChunk.query
+        .filter_by(document_id=document.id)
+        .order_by(DocumentChunk.page_number, DocumentChunk.chunk_index)
+        .all()
+    )
+
+    return jsonify({
+        "document_id": document.id,
+        "filename": document.filename,
+        "chunks": [
+            {
+                "chunk_id": chunk.chunk_id,
+                "content": chunk.content,
+                "page_number": chunk.page_number,
+                "chunk_index": chunk.chunk_index,
+                "extraction_method": chunk.extraction_method,
+                "content_type": chunk.content_type,
+            }
+            for chunk in chunks
+        ],
     })
 
 
