@@ -106,3 +106,15 @@ class Config:
     OLLAMA_REQUEST_TIMEOUT = float(
         os.getenv("OLLAMA_REQUEST_TIMEOUT", "120")
     )
+
+    # Optional observability, with sensitive content disabled by default.
+    PHOENIX_ENABLED = os.getenv("PHOENIX_ENABLED", "false").lower() == "true"
+    PHOENIX_ENDPOINT = os.getenv("PHOENIX_ENDPOINT", "http://localhost:6006")
+    PHOENIX_PROJECT_NAME = os.getenv("PHOENIX_PROJECT_NAME", "local-rag")
+    PHOENIX_CAPTURE_CONTENT = os.getenv("PHOENIX_CAPTURE_CONTENT", "false").lower() == "true"
+    PHOENIX_CAPTURE_RETRIEVED_CONTEXT = os.getenv("PHOENIX_CAPTURE_RETRIEVED_CONTEXT", "false").lower() == "true"
+    PHOENIX_CAPTURE_PROMPTS = os.getenv("PHOENIX_CAPTURE_PROMPTS", "false").lower() == "true"
+    RAGAS_AUTO_EVALUATION_ENABLED = os.getenv("RAGAS_AUTO_EVALUATION_ENABLED", "false").lower() == "true"
+    RAG_GROUNDEDNESS_THRESHOLD = float(os.getenv("RAG_GROUNDEDNESS_THRESHOLD", "0.7"))
+    OLLAMA_INPUT_COST_PER_1K_TOKENS = float(os.getenv("OLLAMA_INPUT_COST_PER_1K_TOKENS", "0"))
+    OLLAMA_OUTPUT_COST_PER_1K_TOKENS = float(os.getenv("OLLAMA_OUTPUT_COST_PER_1K_TOKENS", "0"))

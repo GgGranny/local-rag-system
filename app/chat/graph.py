@@ -28,6 +28,7 @@ from app.chat.service import (
 from app.chat.llm import (
     generate_answer,
 )
+from app.monitoring.service import measured, record, trace_node
 
 
 # ======================================================
@@ -65,6 +66,7 @@ def needs_conversation_rewrite(question: str) -> bool:
     return any(re.search(marker, normalized) for marker in FOLLOW_UP_MARKERS)
 
 
+@trace_node("rag.query.classification")
 def decide_query(
     state: RAGState,
 ) -> RAGState:
@@ -105,6 +107,11 @@ def decide_query(
     )
     print(f"[CHAT] Rewrite required: {needs_rewrite}")
 
+    record(
+        query_type="follow_up" if needs_rewrite else "independent",
+        rewrite_used=needs_rewrite,
+        retrieval_query=original_query,
+    )
     return {
         "original_query": original_query,
         "query_for_retrieval": original_query,
@@ -113,6 +120,7 @@ def decide_query(
         "document_context_changed": document_context_changed,
     }
 
+@trace_node("rag.query.rewrite")
 def rewrite_query(
     state: RAGState
 ) -> RAGState:
@@ -203,6 +211,7 @@ Standalone retrieval question:
     # safest retrieval query in that case.
     if not standalone_question:
         standalone_question = current_question
+    record(retrieval_query=standalone_question)
 
     print(
         f"[GRAPH] Standalone question: "
@@ -223,6 +232,7 @@ def route_after_query_decision(state: RAGState) -> str:
 # RETRIEVAL
 # ======================================================
 
+@trace_node("rag.retrieval")
 def retrieve(
     state: RAGState
 ) -> RAGState:
@@ -277,6 +287,7 @@ def retrieve(
             results
         )
     )
+    record(retrieved_chunks=serialized_results, retrieval_query=question)
 
     return {
         "retrieved_documents":
@@ -288,6 +299,7 @@ def retrieve(
 # BUILD CONTEXT
 # ======================================================
 
+@trace_node("rag.context.build")
 def build_context_node(
     state: RAGState
 ) -> RAGState:
@@ -306,6 +318,7 @@ def build_context_node(
         f"{len(context)} characters."
     )
 
+    record(context=context)
     return {
         "context": context
     }
@@ -315,6 +328,7 @@ def build_context_node(
 # GENERATE ANSWER
 # ======================================================
 
+@trace_node("rag.generation")
 def generate_answer_node(
     state: RAGState
 ) -> RAGState:
@@ -340,6 +354,7 @@ def generate_answer_node(
             "documents."
         )
 
+        record(prompt=None, answer=answer, citations=[])
         return {
             "answer": answer,
 
@@ -360,10 +375,11 @@ def generate_answer_node(
     # GENERATE
     # --------------------------------------------------
 
-    prompt = build_rag_prompt(
-        question=question,
-        context=context,
-    )
+    with measured("rag.prompt.build"):
+        prompt = build_rag_prompt(
+            question=question,
+            context=context,
+        )
 
     print(
         "[GRAPH] Generating answer..."
@@ -384,49 +400,51 @@ def generate_answer_node(
 
     sources = []
 
-    for index, result in enumerate(
-        results,
-        start=1
-    ):
+    with measured("rag.citations"):
+        for index, result in enumerate(
+            results,
+            start=1
+        ):
 
-        metadata = result.get(
-            "metadata",
-            {}
-        )
+            metadata = result.get(
+                "metadata",
+                {}
+            )
 
-        sources.append({
-            "citation":
-                f"[{index}]",
+            sources.append({
+                "citation":
+                    f"[{index}]",
 
-            "chunk_id":
-                result.get(
-                    "chunk_id"
-                ),
+                "chunk_id":
+                    result.get(
+                        "chunk_id"
+                    ),
 
-            "filename":
-                metadata.get(
-                    "filename",
-                    "Unknown"
-                ),
+                "filename":
+                    metadata.get(
+                        "filename",
+                        "Unknown"
+                    ),
 
-            "page_number":
-                metadata.get(
-                    "page_number"
-                ),
+                "page_number":
+                    metadata.get(
+                        "page_number"
+                    ),
 
-            "score":
-                result.get(
-                    "score",
-                    0.0
-                ),
+                "score":
+                    result.get(
+                        "score",
+                        0.0
+                    ),
 
-            "content": result.get("content", ""),
+                "content": result.get("content", ""),
 
-            "extraction_method": metadata.get("extraction_method"),
+                "extraction_method": metadata.get("extraction_method"),
 
-            "document_id": metadata.get("document_id"),
-        })
+                "document_id": metadata.get("document_id"),
+            })
 
+    record(answer=answer, citations=sources)
     return {
         "answer": answer,
 

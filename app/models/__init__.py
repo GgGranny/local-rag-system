@@ -4,6 +4,8 @@ from app.models.chunk import DocumentChunk
 from app.models.conversation import Conversation
 from app.models.document_image import DocumentImage
 from app.models.source_page import DocumentSourcePage
+from app.models.rag_trace import RAGTrace
+from app.models.rag_evaluation import RAGEvaluation
 
 __all__ = [
     "User",
@@ -12,4 +14,6 @@ __all__ = [
     "Conversation",
     "DocumentImage",
     "DocumentSourcePage",
+    "RAGTrace",
+    "RAGEvaluation",
 ]

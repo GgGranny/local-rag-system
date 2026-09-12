@@ -1,0 +1,30 @@
+{% extends "admin/base.html" %}
+{% block admin_content %}
+<section class="admin-dashboard monitoring-dashboard">
+  <div class="monitoring-title">
+    <div><p class="eyebrow">Observability</p><h1>RAG monitoring</h1><p>Production traces and optional evaluation results. Content is shown only when capture is enabled.</p></div>
+    <div><label for="monitoring-window">Range</label><select id="monitoring-window"><option value="15m">Last 15 minutes</option><option value="1h">Last hour</option><option value="24h" selected>Last 24 hours</option><option value="7d">Last 7 days</option></select><button id="monitoring-refresh">Refresh</button></div>
+  </div>
+  <p id="monitoring-state" class="source-loading">Loading monitoring data…</p>
+  <div id="monitoring-content" hidden>
+    <div class="admin-stats monitoring-stats">
+      <article class="stat-card"><span>Requests</span><strong id="metric-requests">—</strong></article><article class="stat-card"><span>QPS</span><strong id="metric-qps">—</strong></article><article class="stat-card"><span>Error rate</span><strong id="metric-errors">—</strong></article><article class="stat-card"><span>p95 latency</span><strong id="metric-p95">—</strong></article><article class="stat-card"><span>Faithfulness</span><strong id="metric-faithfulness">—</strong></article>
+    </div>
+    <div class="monitoring-grid">
+      <article class="monitoring-panel"><h2>Latency by stage</h2><div id="stage-metrics" class="metric-list"></div></article>
+      <article class="monitoring-panel"><h2>Evaluation</h2><div id="evaluation-metrics" class="metric-list"></div><p class="monitoring-note">RAGAS scores appear only after an evaluation completes; this dashboard never treats unevaluated traces as scored.</p></article>
+    </div>
+    <article class="monitoring-panel"><h2>Recent traces</h2><div class="documents-table-wrapper"><table class="documents-table"><thead><tr><th>Started</th><th>Status</th><th>Conversation</th><th>Latency</th><th>Query type</th><th>Trace</th></tr></thead><tbody id="trace-list"></tbody></table></div></article>
+    <article id="trace-detail" class="monitoring-panel" hidden><h2>Trace detail</h2><div id="trace-detail-content"></div></article>
+  </div>
+</section>
+<script>
+(() => {
+ const $=id=>document.getElementById(id), text=(v,f='Unavailable')=>v===null||v===undefined||v===''?f:v;
+ const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+ async function load(){ const w=$('monitoring-window').value; $('monitoring-state').hidden=false; $('monitoring-content').hidden=true; try { const [overview,traces]=await Promise.all([fetch(`{{ url_for('monitoring.api_overview') }}?window=${w}`),fetch(`{{ url_for('monitoring.api_traces') }}?per_page=15`)]); if(!overview.ok||!traces.ok) throw new Error('Unable to load monitoring data.'); const o=await overview.json(), t=await traces.json(); $('metric-requests').textContent=o.requests; $('metric-qps').textContent=o.qps; $('metric-errors').textContent=`${(o.error_rate*100).toFixed(1)}%`; $('metric-p95').textContent=o.latency.p95===null?'—':`${o.latency.p95} ms`; $('metric-faithfulness').textContent=text(o.evaluation.average_faithfulness,'Not evaluated'); $('stage-metrics').innerHTML=o.stages.length?o.stages.map(s=>`<div><span>${esc(s.name)}</span><strong>${s.average_ms} ms avg · p95 ${text(s.p95_ms,'—')} ms</strong></div>`).join(''):'<p>No measured stages in this range.</p>'; $('evaluation-metrics').innerHTML=`<div><span>Completed evaluations</span><strong>${o.evaluation.count}</strong></div><div><span>Answer relevance</span><strong>${text(o.evaluation.average_answer_relevance,'Not evaluated')}</strong></div><div><span>Tokens (reported)</span><strong>${o.token_usage.prompt_tokens + o.token_usage.completion_tokens}</strong></div><div><span>Configured estimated cost</span><strong>${o.token_usage.estimated_cost}</strong></div>`; $('trace-list').innerHTML=t.items.length?t.items.map(x=>`<tr><td>${new Date(x.started_at).toLocaleString()}</td><td>${esc(x.status)}</td><td>${esc(x.conversation_id)}</td><td>${text(x.total_ms===null?null:`${Math.round(x.total_ms)} ms`)}</td><td>${esc(x.query_type||'—')}</td><td><button class="trace-open" data-id="${esc(x.trace_id)}">Inspect</button></td></tr>`).join(''):'<tr><td colspan="6">No RAG requests in this range.</td></tr>'; $('monitoring-state').hidden=true; $('monitoring-content').hidden=false; } catch(e) { $('monitoring-state').textContent=e.message; } }
+ async function detail(id){ const r=await fetch(`{{ url_for('monitoring.api_traces', trace_id='TRACE_ID') }}`.replace('TRACE_ID',encodeURIComponent(id))); if(!r.ok)return; const x=await r.json(); const content=(label,value)=>`<section class="trace-section"><h3>${label}</h3><pre>${esc(value || 'Unavailable due to privacy configuration or missing data.')}</pre></section>`; $('trace-detail-content').innerHTML=content('User input',x.original_query)+content('Retrieval query',x.retrieval_query)+content('Retrieved chunks',JSON.stringify(x.retrieved_chunks,null,2))+content('Final context',x.context)+content('Prompt',x.prompt)+content('Generated answer',x.answer)+content('Citations',JSON.stringify(x.citations,null,2))+content('Timeline',JSON.stringify(x.stage_timings,null,2))+content('Evaluation',JSON.stringify(x.evaluations,null,2)); $('trace-detail').hidden=false; $('trace-detail').scrollIntoView({behavior:'smooth'}); }
+ $('monitoring-refresh').addEventListener('click',load); $('monitoring-window').addEventListener('change',load); $('trace-list').addEventListener('click',e=>{if(e.target.matches('.trace-open'))detail(e.target.dataset.id)}); load();
+})();
+</script>
+{% endblock %}
