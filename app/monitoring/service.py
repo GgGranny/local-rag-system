@@ -93,6 +93,8 @@ class TraceExecution:
         self._persist("FAILED", exc, stage or self.current_stage)
 
     def _persist(self, status: str, exc: Exception | None = None, error_stage: str | None = None):
+        if not Config.MONITORING_ENABLED:
+            return
         try:
             completed_at = datetime.utcnow()
             total_ms = (time.perf_counter() - self.started_perf) * 1000
@@ -116,10 +118,10 @@ class TraceExecution:
                 selected_document_ids_json=_safe_json(self.selected_document_ids),
                 original_query=self.question if Config.MONITORING_STORE_CONTENT else None,
                 retrieval_query=self.data.get("retrieval_query") if Config.MONITORING_STORE_CONTENT else None,
-                retrieved_chunks_json=_safe_json(self.data["retrieved_chunks"]) if Config.MONITORING_STORE_CONTEXT else None,
+                retrieved_chunks_json=_safe_json(self.data["retrieved_chunks"]) if Config.MONITORING_STORE_RETRIEVED_CHUNKS else None,
                 context_text=context, prompt_text=prompt,
-                answer_text=self.data.get("answer") if Config.MONITORING_STORE_CONTENT else None,
-                citations_json=_safe_json(self.data["citations"]),
+                answer_text=self.data.get("answer") if Config.MONITORING_STORE_GENERATED_ANSWERS else None,
+                citations_json=_safe_json(self.data["citations"]) if Config.MONITORING_STORE_CITATIONS else None,
                 stage_timings_json=_safe_json(self.stage_timings),
                 model_name=Config.OLLAMA_CHAT_MODEL,
                 embedding_model_name=Config.OLLAMA_EMBEDDING_MODEL,
@@ -181,6 +183,22 @@ def record(**values) -> None:
 def measured(name: str, **attributes):
     execution = current_execution()
     return execution.stage(name, **attributes) if execution else _NoopSpan()
+
+
+def export_evaluation(trace: RAGTrace, evaluation) -> None:
+    """Best-effort Phoenix annotation for a persisted local evaluation."""
+    attributes = {
+        "rag.trace_id": trace.trace_id,
+        "rag.evaluation.id": evaluation.id,
+        "rag.evaluation.metric": evaluation.metric_name,
+        "rag.evaluation.status": evaluation.status,
+        "rag.evaluation.model": evaluation.evaluator_model or "",
+        "rag.evaluation.duration_ms": evaluation.duration_ms or 0,
+        "rag.evaluation.score": evaluation.answer_relevance,
+        "rag.evaluation.error": evaluation.error_message or "",
+    }
+    with _phoenix.span("rag.evaluation.answer_relevancy", attributes):
+        pass
 
 
 def trace_node(name: str):

@@ -108,6 +108,7 @@ class Config:
     )
 
     # Optional observability, with sensitive content disabled by default.
+    MONITORING_ENABLED = os.getenv("MONITORING_ENABLED", "true").lower() == "true"
     PHOENIX_ENABLED = os.getenv("PHOENIX_ENABLED", "false").lower() == "true"
     PHOENIX_ENDPOINT = os.getenv("PHOENIX_ENDPOINT", "http://localhost:6006")
     PHOENIX_PROJECT_NAME = os.getenv("PHOENIX_PROJECT_NAME", "local-rag")
@@ -125,7 +126,22 @@ class Config:
     MONITORING_STORE_PROMPTS = os.getenv(
         "MONITORING_STORE_PROMPTS", os.getenv("PHOENIX_CAPTURE_PROMPTS", "false")
     ).lower() == "true"
+    MONITORING_STORE_RETRIEVED_CHUNKS = os.getenv(
+        "MONITORING_STORE_RETRIEVED_CHUNKS", os.getenv("MONITORING_STORE_CONTEXT", "false")
+    ).lower() == "true"
+    MONITORING_STORE_GENERATED_ANSWERS = os.getenv(
+        "MONITORING_STORE_GENERATED_ANSWERS", os.getenv("MONITORING_STORE_CONTENT", "false")
+    ).lower() == "true"
+    MONITORING_STORE_CITATIONS = os.getenv(
+        "MONITORING_STORE_CITATIONS", os.getenv("MONITORING_STORE_CONTENT", "false")
+    ).lower() == "true"
     RAGAS_AUTO_EVALUATION_ENABLED = os.getenv("RAGAS_AUTO_EVALUATION_ENABLED", "false").lower() == "true"
+    RAGAS_ENABLED = os.getenv("RAGAS_ENABLED", "false").lower() == "true"
+    RAGAS_ANSWER_RELEVANCY_ENABLED = os.getenv("RAGAS_ANSWER_RELEVANCY_ENABLED", "false").lower() == "true"
+    RAGAS_EVALUATOR_MODEL = os.getenv("RAGAS_EVALUATOR_MODEL", OLLAMA_CHAT_MODEL)
+    RAGAS_EVALUATION_MODE = os.getenv("RAGAS_EVALUATION_MODE", "manual")
+    RAGAS_ANSWER_RELEVANCY_GOOD_THRESHOLD = float(os.getenv("RAGAS_ANSWER_RELEVANCY_GOOD_THRESHOLD", "0.80"))
+    RAGAS_ANSWER_RELEVANCY_WARNING_THRESHOLD = float(os.getenv("RAGAS_ANSWER_RELEVANCY_WARNING_THRESHOLD", "0.60"))
     RAG_GROUNDEDNESS_THRESHOLD = float(os.getenv("RAG_GROUNDEDNESS_THRESHOLD", "0.7"))
     OLLAMA_INPUT_COST_PER_1K_TOKENS = float(os.getenv("OLLAMA_INPUT_COST_PER_1K_TOKENS", "0"))
     OLLAMA_OUTPUT_COST_PER_1K_TOKENS = float(os.getenv("OLLAMA_OUTPUT_COST_PER_1K_TOKENS", "0"))

@@ -1,8 +1,10 @@
 """Admin-only monitoring APIs and the trace explorer UI."""
 
+from collections import Counter, defaultdict
 from datetime import datetime
 
 from flask import Blueprint, jsonify, render_template, request
+from sqlalchemy import and_, or_
 from sqlalchemy.orm import joinedload
 
 from app.auth.decorators import admin_required
@@ -10,6 +12,7 @@ from app.config import Config
 from app.extensions import db
 from app.models import Conversation, RAGEvaluation, RAGTrace, User
 from app.monitoring.metrics import overview, parse_window, trace_payload
+from app.monitoring.ragas_service import evaluation_payload, run_answer_relevancy
 
 
 monitoring_bp = Blueprint("monitoring", __name__, url_prefix="/admin/monitoring")
@@ -34,6 +37,31 @@ def _page():
     return value, per_page, None
 
 
+def _evaluation_query():
+    """Apply documented, admin-only filters to answer-relevancy records."""
+    query = RAGEvaluation.query.filter_by(metric_name="answer_relevancy")
+    for field in ("trace_id", "conversation_id", "user_id", "evaluator_model", "status"):
+        value = request.args.get(field)
+        if value:
+            column = getattr(RAGEvaluation, field)
+            try:
+                query = query.filter(column == int(value)) if field in {"conversation_id", "user_id"} else query.filter(column == value)
+            except ValueError:
+                return None, (jsonify({"error": f"{field} must be an integer."}), 400)
+    for key, comparison in (("date_from", "gte"), ("date_to", "lte")):
+        value = request.args.get(key)
+        if value:
+            try:
+                timestamp = datetime.fromisoformat(value)
+                query = query.filter(
+                    RAGEvaluation.created_at >= timestamp if comparison == "gte"
+                    else RAGEvaluation.created_at <= timestamp
+                )
+            except ValueError:
+                return None, (jsonify({"error": f"{key} must be an ISO-8601 timestamp."}), 400)
+    return query, None
+
+
 @monitoring_bp.route("", methods=["GET"])
 @admin_required
 def dashboard():
@@ -56,15 +84,34 @@ def api_overview():
     if error:
         return error
     payload = overview(window)
-    evaluations = RAGEvaluation.query.filter_by(status="COMPLETED").all()
-    faithfulness = [item.faithfulness for item in evaluations if item.faithfulness is not None]
-    relevance = [item.answer_relevance for item in evaluations if item.answer_relevance is not None]
-    payload["evaluation"] = {
-        "count": len(evaluations),
-        "average_faithfulness": round(sum(faithfulness) / len(faithfulness), 3) if faithfulness else None,
-        "average_answer_relevance": round(sum(relevance) / len(relevance), 3) if relevance else None,
-    }
     since = datetime.utcnow() - window
+    evaluations = RAGEvaluation.query.filter(
+        RAGEvaluation.metric_name == "answer_relevancy",
+        or_(
+            RAGEvaluation.evaluated_at >= since,
+            and_(RAGEvaluation.evaluated_at.is_(None), RAGEvaluation.created_at >= since),
+        ),
+    ).all()
+    completed = [item for item in evaluations if item.status == "COMPLETED" and item.answer_relevance is not None]
+    relevance = [item.answer_relevance for item in completed]
+    status_counts = Counter(item.status.lower() for item in evaluations)
+    eligible_traces = RAGTrace.query.filter(
+        RAGTrace.started_at >= since, RAGTrace.status == "SUCCESS",
+        RAGTrace.original_query.isnot(None), RAGTrace.answer_text.isnot(None),
+    ).count()
+    trend = defaultdict(list)
+    for item in completed:
+        trend[(item.evaluated_at or item.created_at).strftime("%Y-%m-%d %H:00")].append(item.answer_relevance)
+    payload["evaluation"] = {
+        "count": len(completed),
+        "average_answer_relevance": round(sum(relevance) / len(relevance), 3) if relevance else None,
+        "pending": status_counts["pending"] + status_counts["running"],
+        "failed": status_counts["failed"],
+        "unevaluated": max(eligible_traces - len(completed), 0),
+        "lowest_scoring": [evaluation_payload(item) for item in sorted(completed, key=lambda item: item.answer_relevance)[:5]],
+        "trend": [{"time": key, "average": round(sum(values) / len(values), 3), "count": len(values)}
+                  for key, values in sorted(trend.items())],
+    }
     traces = RAGTrace.query.filter(RAGTrace.started_at >= since).all()
     reported = [item for item in traces if item.prompt_tokens is not None or item.completion_tokens is not None]
     payload["token_usage"] = {
@@ -106,13 +153,32 @@ def api_trace(trace_id):
         return jsonify({"error": "Trace not found."}), 404
     payload = trace_payload(trace, include_content=True)
     payload["evaluations"] = [{
-        "id": item.id, "status": item.status, "method": item.method,
+        **evaluation_payload(item), "id": item.id,
         "faithfulness": item.faithfulness, "answer_relevance": item.answer_relevance,
         "context_precision": item.context_precision, "context_recall": item.context_recall,
         "answer_correctness": item.answer_correctness, "created_at": item.created_at.isoformat(),
         "error_message": item.error_message,
-    } for item in trace.evaluations]
+    } for item in sorted(trace.evaluations, key=lambda item: item.created_at, reverse=True)]
     return jsonify(payload)
+
+
+@monitoring_bp.route("/api/traces/<string:trace_id>/evaluations/answer-relevancy", methods=["POST"])
+@admin_required
+def run_answer_relevancy_evaluation(trace_id):
+    trace = RAGTrace.query.filter_by(trace_id=trace_id).first()
+    if not trace:
+        return jsonify({"error": "Trace not found."}), 404
+    if Config.RAGAS_EVALUATION_MODE.lower() != "manual":
+        return jsonify({"error": "Manual evaluation is disabled by RAGAS_EVALUATION_MODE."}), 409
+    running = RAGEvaluation.query.filter_by(
+        trace_id=trace_id, metric_name="answer_relevancy", status="RUNNING"
+    ).first()
+    if running:
+        return jsonify({"error": "An answer-relevancy evaluation is already running.",
+                        "evaluation": evaluation_payload(running)}), 409
+    item = run_answer_relevancy(trace)
+    code = 201 if item.status == "COMPLETED" else 422
+    return jsonify({"evaluation": evaluation_payload(item)}), code
 
 
 @monitoring_bp.route("/api/conversations", methods=["GET"])
@@ -146,9 +212,19 @@ def api_evaluations():
     page, per_page, error = _page()
     if error:
         return error
-    result = RAGEvaluation.query.order_by(RAGEvaluation.created_at.desc()).paginate(page=page, per_page=per_page, error_out=False)
-    return jsonify({"items": [{"id": item.id, "trace_id": item.trace_id, "status": item.status,
-                                 "method": item.method, "faithfulness": item.faithfulness,
+    query, query_error = _evaluation_query()
+    if query_error:
+        return query_error
+    result = query.order_by(RAGEvaluation.created_at.desc()).paginate(page=page, per_page=per_page, error_out=False)
+    return jsonify({"items": [{**evaluation_payload(item), "id": item.id,
+                                 "faithfulness": item.faithfulness,
                                  "answer_relevance": item.answer_relevance, "context_precision": item.context_precision,
                                  "context_recall": item.context_recall, "created_at": item.created_at.isoformat()}
                                 for item in result.items], "page": page, "total": result.total, "pages": result.pages})
+
+
+@monitoring_bp.route("/api/evaluations/answer-relevancy", methods=["GET"])
+@admin_required
+def api_answer_relevancy_evaluations():
+    """Filtered answer-relevancy endpoint retained alongside generic metrics."""
+    return api_evaluations()
