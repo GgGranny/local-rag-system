@@ -3,7 +3,8 @@
 from app import create_app
 from app.extensions import db
 from app.models import RAGEvaluation, RAGTrace, User
-from app.monitoring.ragas_service import run_answer_relevancy
+from app.config import Config
+from app.monitoring.ragas_service import _validated_answer_relevancy_input, run_answer_relevancy
 
 
 def make_app(tmp_path):
@@ -61,9 +62,11 @@ def make_trace(app, *, question="What is the policy?", answer="The policy is 30 
         return trace.trace_id
 
 
-def test_manual_evaluation_persists_exact_trace_inputs(tmp_path):
+def test_manual_evaluation_persists_exact_trace_inputs(tmp_path, monkeypatch):
     app = make_app(tmp_path)
     trace_id = make_trace(app)
+    monkeypatch.setattr(Config, "RAGAS_ENABLED", False)
+    monkeypatch.setattr(Config, "RAGAS_ANSWER_RELEVANCY_ENABLED", False)
     with app.app_context():
         trace = RAGTrace.query.filter_by(trace_id=trace_id).one()
         item = run_answer_relevancy(trace)
@@ -73,6 +76,19 @@ def test_manual_evaluation_persists_exact_trace_inputs(tmp_path):
         assert item.generated_answer == "The policy is 30 days."
         assert item.answer_relevance is None
         assert item.evaluated_at is not None
+
+
+def test_answer_relevancy_input_requires_original_question_and_answer(tmp_path):
+    app = make_app(tmp_path)
+    trace_id = make_trace(app, question="", answer="")
+    with app.app_context():
+        trace = RAGTrace.query.filter_by(trace_id=trace_id).one()
+        try:
+            _validated_answer_relevancy_input(trace)
+        except ValueError as exc:
+            assert str(exc) == "Original question is missing."
+        else:
+            raise AssertionError("Missing original question must be rejected")
 
 
 def test_evaluation_api_is_admin_only_and_reports_no_zero_score(tmp_path):
