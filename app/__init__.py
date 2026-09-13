@@ -34,6 +34,8 @@ def create_app(test_config: dict | None = None) -> Flask:
     # Create database and default admin
     with app.app_context():
         db.create_all()
+        from app.monitoring.schema import ensure_monitoring_schema
+        ensure_monitoring_schema()
         create_default_admin(app)
 
     return app

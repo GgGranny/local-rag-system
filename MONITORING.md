@@ -41,6 +41,16 @@ The trace captures the request, query classification, optional rewrite, retrieva
 
 The UI distinguishes evaluated and unevaluated traces. RAGAS 0.4.3 is installed, but its modern faithfulness metric requires an instructor-compatible evaluator. The existing local `ChatOllama` integration is not that adapter, so automatic RAGAS evaluation remains disabled rather than emitting fabricated scores. `rag_evaluations` is available for a compatible local/offline evaluator to persist faithfulness, relevance, context precision/recall, and correctness results.
 
+## Manual answer relevancy
+
+RAGAS 0.4.3 exposes the legacy-compatible `AnswerRelevancy` metric (`answer_relevancy`). The admin trace page can run it manually with the local `ChatOllama` evaluator and local `OllamaEmbeddings`; it evaluates the exact stored `original_query` and `answer_text` for that trace. It does not use the rewritten retrieval query as the question.
+
+RAGAS 0.4.3 uses `SingleTurnSample(user_input=<original question>, response=<generated answer>)` and `single_turn_ascore`. The application probes that installed API at evaluation time and records a safe `FAILED` result if it cannot be imported or is incompatible; this never affects chat. The current local environment has a RAGAS/langchain-community compatibility problem (`langchain_community.chat_models.vertexai` is absent), so live evaluation requires correcting that installed dependency before enabling RAGAS. No cloud model is used.
+
+Enable it with `RAGAS_ENABLED=true`, `RAGAS_ANSWER_RELEVANCY_ENABLED=true`, `RAGAS_EVALUATOR_MODEL=qwen3:1.7b`, and `RAGAS_EVALUATION_MODE=manual`. A result is persisted in `rag_evaluations` with its trace, conversation, message, user, evaluator model, RAGAS version, duration, and status. The score ranges from 0 to 1; values at or above `.80` are shown as high relevance and below `.60` as low relevance by the configured application thresholds. It measures whether the answer addresses the question, not factual correctness or grounding.
+
+Manual evaluation requires both `MONITORING_STORE_CONTENT=true` and `MONITORING_STORE_GENERATED_ANSWERS=true` for new traces; otherwise the result is `MISSING_INPUT`. Each trace has one current `answer_relevancy` record, which preserves the exact original question, final retrieval query, and generated answer used in the run. The admin-only `GET /admin/monitoring/api/evaluations/answer-relevancy` endpoint supports `trace_id`, `conversation_id`, `user_id`, `evaluator_model`, `status`, `date_from`, `date_to`, `page`, and `per_page`; `POST /admin/monitoring/api/traces/<trace_id>/evaluations/answer-relevancy` runs it. The dashboard shows average, completed/pending/failed/unevaluated counts, low scores, and a time trend. Phoenix export is best-effort and does not affect SQLite persistence.
+
 ## Verification
 
 Run the focused checks with:

@@ -185,6 +185,22 @@ def measured(name: str, **attributes):
     return execution.stage(name, **attributes) if execution else _NoopSpan()
 
 
+def export_evaluation(trace: RAGTrace, evaluation) -> None:
+    """Best-effort Phoenix annotation for a persisted local evaluation."""
+    attributes = {
+        "rag.trace_id": trace.trace_id,
+        "rag.evaluation.id": evaluation.id,
+        "rag.evaluation.metric": evaluation.metric_name,
+        "rag.evaluation.status": evaluation.status,
+        "rag.evaluation.model": evaluation.evaluator_model or "",
+        "rag.evaluation.duration_ms": evaluation.duration_ms or 0,
+        "rag.evaluation.score": evaluation.answer_relevance,
+        "rag.evaluation.error": evaluation.error_message or "",
+    }
+    with _phoenix.span("rag.evaluation.answer_relevancy", attributes):
+        pass
+
+
 def trace_node(name: str):
     """Measure a LangGraph node without storing tracing objects in graph state."""
     def decorator(function):
