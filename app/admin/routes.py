@@ -12,7 +12,7 @@ from flask import (
 from app.auth.decorators import admin_required
 from app.extensions import db
 from app.models import User, Document
-from app.ingestion.pipeline import process_document, remove_document_index
+from app.ingestion.pipeline import process_document, remove_document_index, delete_document
 
 
 admin_bp = Blueprint(
@@ -150,6 +150,59 @@ def documents():
         "admin/documents.html",
         documents=documents
     )
+
+
+def _validated_bulk_document_ids():
+    values = request.form.getlist("document_ids")
+    if not values:
+        raise ValueError("Select at least one document.")
+    try:
+        ids = [int(value) for value in values]
+    except (TypeError, ValueError):
+        raise ValueError("Document IDs must be valid integers.") from None
+    if any(document_id <= 0 for document_id in ids) or len(ids) != len(set(ids)):
+        raise ValueError("Document IDs must be unique positive integers.")
+    found = {item.id for item in Document.query.filter(Document.id.in_(ids)).all()}
+    if found != set(ids):
+        raise LookupError("One or more selected documents no longer exist.")
+    return ids
+
+
+@admin_bp.route("/documents/<int:document_id>/delete", methods=["POST"])
+@admin_required
+def delete_document_route(document_id):
+    try:
+        filename = delete_document(document_id)
+    except LookupError:
+        flash("Document not found.", "error")
+    except Exception:
+        current_app.logger.exception("[DOCUMENT] Failed to delete document %s", document_id)
+        flash("Document deletion failed; no success was recorded.", "error")
+    else:
+        flash(f"'{filename}' was deleted with its retrieval and source assets.", "success")
+    return redirect(url_for("admin.documents"))
+
+
+@admin_bp.route("/documents/bulk-delete", methods=["POST"])
+@admin_required
+def bulk_delete_documents():
+    names = []
+    try:
+        document_ids = _validated_bulk_document_ids()
+        for document_id in document_ids:
+            names.append(delete_document(document_id))
+    except (ValueError, LookupError) as exc:
+        flash(str(exc), "error")
+    except Exception:
+        current_app.logger.exception("[DOCUMENT] Failed to bulk delete documents")
+        flash(
+            f"Bulk deletion stopped after deleting {len(names)} document(s); "
+            "check the logs before retrying the remaining selection.",
+            "error",
+        )
+    else:
+        flash(f"Deleted {len(names)} document{'s' if len(names) != 1 else ''}.", "success")
+    return redirect(url_for("admin.documents"))
 
 
 @admin_bp.route(

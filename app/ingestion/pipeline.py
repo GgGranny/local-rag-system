@@ -223,6 +223,15 @@ def process_document(document_id: int):
             f"{len(chunks)} chunks."
         )
 
+        # Processing is currently request-synchronous, but another admin
+        # request may still delete the document while extraction is running.
+        # Expire the identity map before any persistent write so this worker
+        # cannot recreate chunks/assets for a deleted document.
+        db.session.expire_all()
+        document = db.session.get(Document, document_id)
+        if not document:
+            raise ValueError("Document was deleted while processing.")
+
         # --------------------------------------------------
         # REMOVE OLD DATABASE CHUNKS
         # --------------------------------------------------
@@ -391,3 +400,53 @@ def remove_document_index(document_id: int) -> None:
     )
     db.session.commit()
     rebuild_bm25_index()
+
+
+def _unlink_managed_file(path_value: str, parent_directory: Path) -> None:
+    """Delete a known managed asset without trusting a database/client path."""
+    if not path_value:
+        return
+    parent = parent_directory.resolve()
+    raw_path = Path(path_value)
+    candidate = (raw_path if raw_path.is_absolute() else parent / raw_path).resolve()
+    if candidate.parent != parent:
+        raise ValueError("Refusing to remove a file outside managed storage.")
+    if candidate.exists():
+        candidate.unlink()
+
+
+def delete_document(document_id: int) -> str:
+    """Remove one document and only its retrieval, database, and file assets.
+
+    Chroma is cleaned first so a cleanup failure leaves the document record
+    intact and prevents the caller from reporting a false success. Files are
+    checked against configured folders; SQL rows are committed last.
+    """
+    document = db.session.get(Document, document_id)
+    if not document:
+        raise LookupError("Document not found.")
+
+    filename = document.filename
+    image_rows = DocumentImage.query.filter_by(document_id=document.id).all()
+    try:
+        delete_document_chunks(document.id)
+
+        upload_directory = Path(Config.UPLOAD_FOLDER)
+        source_image_directory = Path(Config.SOURCE_IMAGE_FOLDER)
+        _unlink_managed_file(document.file_path, upload_directory)
+        for image in image_rows:
+            _unlink_managed_file(image.stored_filename, source_image_directory)
+
+        DocumentChunk.query.filter_by(document_id=document.id).delete(synchronize_session=False)
+        DocumentSourcePage.query.filter_by(document_id=document.id).delete(synchronize_session=False)
+        DocumentImage.query.filter_by(document_id=document.id).delete(synchronize_session=False)
+        db.session.delete(document)
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        raise
+
+    # BM25 is an in-memory projection of completed chunks and must be rebuilt
+    # after the database commit, never from stale ORM objects.
+    rebuild_bm25_index()
+    return filename

@@ -46,7 +46,15 @@
 
     <section class="documents-section">
 
-        <h2>All Documents</h2>
+        <div class="document-management-toolbar">
+            <h2>All Documents</h2>
+            <div>
+                <span id="selected-document-count" aria-live="polite">0 selected</span>
+                <button id="bulk-delete-button" class="table-action destructive" type="button" disabled>
+                    Delete selected
+                </button>
+            </div>
+        </div>
 
 
         {% if documents %}
@@ -58,6 +66,7 @@
                     <thead>
 
                         <tr>
+                            <th><input id="select-all-documents" type="checkbox" aria-label="Select all displayed documents"></th>
                             <th>ID</th>
                             <th>Filename</th>
                             <th>Type</th>
@@ -75,6 +84,8 @@
                         {% for document in documents %}
 
                             <tr>
+
+                                <td><input class="document-select" type="checkbox" name="document_ids" value="{{ document.id }}" form="bulk-delete-form" aria-label="Select {{ document.filename }}"></td>
 
                                 <td>
                                     {{ document.id }}
@@ -157,6 +168,10 @@
 
                                     {% endif %}
 
+                                    <button class="table-action destructive document-delete-button" type="button" data-document-id="{{ document.id }}" data-document-name="{{ document.filename }}">
+                                        Delete
+                                    </button>
+
                                 </td>
 
                             </tr>
@@ -169,6 +184,8 @@
 
             </div>
 
+            <form id="bulk-delete-form" method="POST" action="{{ url_for('admin.bulk_delete_documents') }}"></form>
+
         {% else %}
 
             <p>
@@ -180,5 +197,63 @@
     </section>
 
 </div>
+
+<dialog id="document-delete-dialog" class="progress-modal">
+    <div class="modal-header">
+        <div>
+            <p class="eyebrow">Permanent action</p>
+            <h2>Delete document(s)?</h2>
+        </div>
+        <button id="cancel-document-delete" class="icon-button" type="button" aria-label="Cancel deletion">×</button>
+    </div>
+    <div class="delete-dialog-content">
+        <p id="delete-dialog-message"></p>
+        <ul id="delete-document-names" class="delete-document-names"></ul>
+        <p class="delete-warning">This removes uploaded files, extracted text, OCR/source assets, chunks, and scoped embeddings. It cannot be undone.</p>
+        <div class="delete-dialog-actions">
+            <button id="cancel-document-delete-secondary" type="button">Cancel</button>
+            <button id="confirm-document-delete" class="table-action destructive" type="button">Confirm deletion</button>
+        </div>
+    </div>
+</dialog>
+
+<script>
+(() => {
+    const checks = () => [...document.querySelectorAll('.document-select')];
+    const selectAll = document.getElementById('select-all-documents');
+    const bulkButton = document.getElementById('bulk-delete-button');
+    const counter = document.getElementById('selected-document-count');
+    const dialog = document.getElementById('document-delete-dialog');
+    const confirmButton = document.getElementById('confirm-document-delete');
+    let mode = null;
+    let selected = [];
+    const update = () => {
+        const selectedChecks = checks().filter((checkbox) => checkbox.checked);
+        counter.textContent = `${selectedChecks.length} selected`;
+        bulkButton.disabled = selectedChecks.length === 0;
+        selectAll.checked = checks().length > 0 && selectedChecks.length === checks().length;
+        selectAll.indeterminate = selectedChecks.length > 0 && !selectAll.checked;
+    };
+    selectAll?.addEventListener('change', () => { checks().forEach((checkbox) => checkbox.checked = selectAll.checked); update(); });
+    checks().forEach((checkbox) => checkbox.addEventListener('change', update));
+    const open = (items, kind) => {
+        selected = items; mode = kind;
+        document.getElementById('delete-dialog-message').textContent = kind === 'single' ? `Delete “${items[0].name}”?` : `Delete ${items.length} selected documents?`;
+        const names = document.getElementById('delete-document-names'); names.replaceChildren();
+        items.forEach((item) => { const row = document.createElement('li'); row.textContent = item.name; names.appendChild(row); });
+        dialog.showModal();
+    };
+    document.querySelectorAll('.document-delete-button').forEach((button) => button.addEventListener('click', () => open([{ id: button.dataset.documentId, name: button.dataset.documentName }], 'single')));
+    bulkButton?.addEventListener('click', () => open(checks().filter((checkbox) => checkbox.checked).map((checkbox) => ({ id: checkbox.value, name: checkbox.closest('tr').querySelector('td:nth-child(3)').textContent.trim() })), 'bulk'));
+    const close = () => dialog.close();
+    document.getElementById('cancel-document-delete').addEventListener('click', close);
+    document.getElementById('cancel-document-delete-secondary').addEventListener('click', close);
+    confirmButton.addEventListener('click', () => {
+        confirmButton.disabled = true; confirmButton.textContent = 'Deleting…';
+        if (mode === 'single') { const form = document.createElement('form'); form.method = 'POST'; form.action = `/admin/documents/${encodeURIComponent(selected[0].id)}/delete`; document.body.appendChild(form); form.submit(); return; }
+        document.getElementById('bulk-delete-form').submit();
+    });
+})();
+</script>
 
 {% endblock %}
