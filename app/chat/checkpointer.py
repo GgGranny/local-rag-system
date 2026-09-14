@@ -39,3 +39,19 @@ def get_checkpointer():
         )
 
     return _checkpointer
+
+
+def delete_thread_checkpoints(thread_id: str) -> None:
+    """Remove only the persisted LangGraph state for one conversation."""
+    connection = get_checkpointer() and _connection
+    if connection is None:
+        return
+    # These are LangGraph's SQLite tables.  Keeping this explicit prevents a
+    # chat delete from ever touching the shared document database.
+    for table in ("checkpoint_writes", "checkpoint_blobs", "checkpoints"):
+        try:
+            connection.execute(f"DELETE FROM {table} WHERE thread_id = ?", (thread_id,))
+        except sqlite3.OperationalError:
+            # Older LangGraph versions may not create every table.
+            continue
+    connection.commit()

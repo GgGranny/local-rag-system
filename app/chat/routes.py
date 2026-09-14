@@ -1,5 +1,6 @@
 from flask import (
     Blueprint,
+    current_app,
     request,
     jsonify,
     session,
@@ -12,6 +13,7 @@ from app.auth.decorators import login_required
 from app.extensions import db
 from app.models import Conversation, Document, User
 from app.chat.graph import build_graph
+from app.chat.checkpointer import delete_thread_checkpoints
 from app.monitoring.service import begin_execution, measured
 from flask import render_template
 
@@ -24,6 +26,54 @@ chat_bp = Blueprint(
 
 
 _graph = None
+
+
+def conversation_for_request(thread_id):
+    """Load a conversation under the server-side owner/admin policy."""
+    conversation = Conversation.query.filter_by(thread_id=thread_id).first()
+    if not conversation:
+        return None
+    user = db.session.get(User, session["user_id"])
+    if not user or (not user.is_admin and conversation.user_id != user.id):
+        return None
+    return conversation
+
+
+def serialize_conversation(conversation):
+    return {
+        "id": conversation.id,
+        "thread_id": conversation.thread_id,
+        "title": conversation.title,
+        "owner": conversation.user.username if conversation.user else None,
+        "owner_id": conversation.user_id,
+        "created_at": conversation.created_at.isoformat(),
+        "updated_at": conversation.updated_at.isoformat(),
+    }
+
+
+def enrich_sources_with_images(sources):
+    """Attach a stable page visual when an OCR/image-backed source has one."""
+    from app.models import DocumentImage
+
+    page_keys = {
+        (source.get("document_id"), source.get("page_number"))
+        for source in sources
+        if source.get("document_id") is not None and source.get("page_number") is not None
+    }
+    if not page_keys:
+        return sources
+    document_ids = {key[0] for key in page_keys}
+    images = DocumentImage.query.filter(DocumentImage.document_id.in_(document_ids)).all()
+    by_page = {}
+    for image in images:
+        by_page.setdefault((image.document_id, image.page_number), image)
+    for source in sources:
+        image = by_page.get((source.get("document_id"), source.get("page_number")))
+        if image:
+            source["image_id"] = image.image_id
+            source["source_type"] = image.source_kind
+            source["is_ocr"] = image.source_kind == "ocr_page"
+    return sources
 
 
 def get_graph():
@@ -73,9 +123,12 @@ def list_conversations():
 
     user_id = session["user_id"]
 
+    user = db.session.get(User, user_id)
+    query = Conversation.query
+    if not user or not user.is_admin:
+        query = query.filter_by(user_id=user_id)
     conversations = (
-        Conversation.query
-        .filter_by(user_id=user_id)
+        query
         .order_by(
             Conversation.updated_at.desc()
         )
@@ -83,17 +136,7 @@ def list_conversations():
     )
 
     return jsonify([
-        {
-            "id": conversation.id,
-            "thread_id": conversation.thread_id,
-            "title": conversation.title,
-            "created_at": (
-                conversation.created_at.isoformat()
-            ),
-            "updated_at": (
-                conversation.updated_at.isoformat()
-            ),
-        }
+        serialize_conversation(conversation)
         for conversation in conversations
     ])
 
@@ -191,14 +234,7 @@ def ask():
     # CONVERSATION OWNERSHIP
     # --------------------------------------------------
 
-    conversation = (
-        Conversation.query
-        .filter_by(
-            thread_id=thread_id,
-            user_id=user_id,
-        )
-        .first()
-    )
+    conversation = conversation_for_request(thread_id)
 
     if not conversation:
 
@@ -251,9 +287,12 @@ def ask():
             )
 
         with measured("rag.persistence"):
+            if conversation.title == "New conversation":
+                conversation.title = question[:100]
             conversation.updated_at = datetime.utcnow()
             db.session.commit()
 
+        result["sources"] = enrich_sources_with_images(result.get("sources", []))
         execution.complete(result)
 
         return jsonify({
@@ -302,20 +341,7 @@ def ask():
 @login_required
 def get_conversation(thread_id):
 
-    user_id = session["user_id"]
-
-    # -----------------------------
-    # Verify ownership
-    # -----------------------------
-
-    conversation = (
-        Conversation.query
-        .filter_by(
-            thread_id=thread_id,
-            user_id=user_id,
-        )
-        .first()
-    )
+    conversation = conversation_for_request(thread_id)
 
     if not conversation:
         return jsonify({
@@ -372,12 +398,10 @@ def get_conversation(thread_id):
                 ),
             })
 
-        return jsonify({
-            "id": conversation.id,
-            "thread_id": conversation.thread_id,
-            "title": conversation.title,
-            "messages": serialized_messages,
-        })
+        sources = enrich_sources_with_images(list(values.get("sources", [])))
+        payload = serialize_conversation(conversation)
+        payload.update({"messages": serialized_messages, "sources": sources})
+        return jsonify(payload)
 
     except Exception as exc:
 
@@ -392,3 +416,22 @@ def get_conversation(thread_id):
                 "conversation."
             )
         }), 500
+
+
+@chat_bp.route("/conversations/<string:thread_id>", methods=["DELETE"])
+@login_required
+def delete_conversation(thread_id):
+    """Delete an owned conversation; admins may manage conversations."""
+    conversation = conversation_for_request(thread_id)
+    if not conversation:
+        return jsonify({"error": "Conversation not found."}), 404
+    checkpoint_thread_id = conversation.thread_id
+    try:
+        delete_thread_checkpoints(checkpoint_thread_id)
+        db.session.delete(conversation)
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        current_app.logger.exception("[CHAT] Failed to delete conversation %s", thread_id)
+        return jsonify({"error": "Failed to delete conversation."}), 500
+    return jsonify({"deleted": True, "thread_id": checkpoint_thread_id})

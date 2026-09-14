@@ -301,12 +301,42 @@ async function showSource(source) {
     }
 }
 
-async function loadConversations() { const response = await fetch("/chat/conversations"); if (!response.ok) return; const entries = await response.json(); const list = byId("conversation-list"); list.replaceChildren(); if (!entries.length) { list.innerHTML = '<p class="empty-state">No conversations yet.</p>'; return; } entries.forEach((entry) => { const item = document.createElement("button"); item.type = "button"; item.className = "conversation-item"; item.textContent = entry.title; item.dataset.threadId = entry.thread_id; item.addEventListener("click", () => loadConversation(entry.thread_id)); list.appendChild(item); }); }
+function setActiveThread(threadId, replace = false) {
+    currentThreadId = threadId || null;
+    const url = new URL(window.location.href);
+    if (threadId) url.searchParams.set("conversation", threadId); else url.searchParams.delete("conversation");
+    window.history[replace ? "replaceState" : "pushState"]({}, "", url);
+}
+
+function displayTime(value) {
+    if (!value) return "";
+    const date = new Date(value);
+    return Number.isNaN(date.valueOf()) ? "" : date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
+async function loadConversations() {
+    const response = await fetch("/chat/conversations");
+    if (!response.ok) throw new Error("Could not load conversations.");
+    const entries = await response.json(); const list = byId("conversation-list"); list.replaceChildren();
+    if (!entries.length) { list.innerHTML = '<p class="empty-state">No conversations yet. Start a new chat.</p>'; return entries; }
+    entries.forEach((entry) => {
+        const row = document.createElement("div"); row.className = "conversation-row";
+        const item = document.createElement("button"); item.type = "button"; item.className = "conversation-item"; item.dataset.threadId = entry.thread_id;
+        const owner = isAdmin() && entry.owner ? `<span class="conversation-owner">${escapeHtml(entry.owner)}</span>` : "";
+        item.innerHTML = `<span class="conversation-title">${escapeHtml(entry.title || "New conversation")}</span><span class="conversation-details">${owner}<time>${escapeHtml(displayTime(entry.updated_at))}</time></span>`;
+        item.addEventListener("click", () => loadConversation(entry.thread_id));
+        const remove = document.createElement("button"); remove.type = "button"; remove.className = "conversation-delete"; remove.title = "Delete chat"; remove.setAttribute("aria-label", `Delete ${entry.title || "chat"}`); remove.textContent = "×";
+        remove.addEventListener("click", (event) => { event.stopPropagation(); deleteConversation(entry.thread_id, entry.title); });
+        row.append(item, remove); list.appendChild(row);
+    });
+    highlightActiveConversation(currentThreadId); return entries;
+}
 function highlightActiveConversation(threadId) { document.querySelectorAll(".conversation-item").forEach((item) => item.classList.toggle("active", item.dataset.threadId === threadId)); }
-async function createConversation() { const response = await fetch("/chat/conversations", { method: "POST" }); if (!response.ok) throw new Error("Failed to create conversation."); const entry = await response.json(); currentThreadId = entry.thread_id; clearChat(); await loadConversations(); highlightActiveConversation(currentThreadId); }
-async function loadConversation(threadId) { const response = await fetch(`/chat/conversations/${encodeURIComponent(threadId)}`); if (!response.ok) return; const entry = await response.json(); currentThreadId = entry.thread_id; clearChat(); entry.messages.forEach((message) => addMessage(message.role, message.content)); highlightActiveConversation(threadId); }
+async function createConversation() { const response = await fetch("/chat/conversations", { method: "POST" }); const entry = await response.json(); if (!response.ok) throw new Error(entry.error || "Failed to create conversation."); selectedDocumentIds.clear(); setActiveThread(entry.thread_id); clearChat(); byId("chat-input").value = ""; await loadConversations(); highlightActiveConversation(currentThreadId); byId("chat-input").focus(); }
+async function loadConversation(threadId, replaceHistory = false) { clearChat(); const response = await fetch(`/chat/conversations/${encodeURIComponent(threadId)}`); const entry = await response.json(); if (!response.ok) { clearChat(); throw new Error(entry.error || "Could not load conversation."); } setActiveThread(entry.thread_id, replaceHistory); const lastAssistantIndex = [...entry.messages].map((item) => item.role).lastIndexOf("assistant"); entry.messages.forEach((message, index) => addMessage(message.role, message.content, index === lastAssistantIndex ? entry.sources || [] : [])); highlightActiveConversation(threadId); }
+async function deleteConversation(threadId, title) { if (!window.confirm(`Delete ${title || "this chat"}?\nThis action cannot be undone.`)) return; const response = await fetch(`/chat/conversations/${encodeURIComponent(threadId)}`, { method: "DELETE" }); const result = await response.json(); if (!response.ok) { alert(result.error || "Could not delete this chat."); return; } const entries = await loadConversations(); if (currentThreadId === threadId) { const next = entries.find((entry) => entry.thread_id !== threadId); if (next) await loadConversation(next.thread_id, true); else { setActiveThread(null, true); clearChat(); } } }
 async function sendMessage() { const input = byId("chat-input"); const question = input.value.trim(); if (!question || byId("send-button").disabled) return; try { if (!currentThreadId) await createConversation(); addMessage("user", question); input.value = ""; setGenerating(true); const response = await fetch("/chat/ask", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ thread_id: currentThreadId, question, document_ids: selectedIds() }) }); const result = await response.json(); if (!response.ok) throw new Error(result.error || "Something went wrong while generating the answer."); setGenerating(true, "Generating answer…"); addMessage("assistant", result.answer, result.sources || []); renderSources(result.sources || []); await loadConversations(); highlightActiveConversation(currentThreadId); } catch (error) { addMessage("assistant", error.message || "Something went wrong while generating the answer."); } finally { setGenerating(false); input.focus(); } }
 
-function initialiseChat() { byId("upload-button").addEventListener("click", () => byId("file-input").click()); byId("file-input").addEventListener("change", () => { if (byId("file-input").files[0]) { showUploadPreview(byId("file-input").files[0]); uploadDocument(); } }); byId("new-chat-button").addEventListener("click", () => createConversation().catch((error) => alert(error.message))); byId("send-button").addEventListener("click", sendMessage); byId("chat-input").addEventListener("keydown", (event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); sendMessage(); } }); byId("close-progress-modal").addEventListener("click", () => byId("document-progress-modal").close()); loadConversations(); loadDocuments().catch(() => {}); }
+function initialiseChat() { byId("upload-button").addEventListener("click", () => byId("file-input").click()); byId("file-input").addEventListener("change", () => { if (byId("file-input").files[0]) { showUploadPreview(byId("file-input").files[0]); uploadDocument(); } }); byId("new-chat-button").addEventListener("click", () => createConversation().catch((error) => alert(error.message))); byId("send-button").addEventListener("click", sendMessage); byId("chat-input").addEventListener("keydown", (event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); sendMessage(); } }); byId("close-progress-modal").addEventListener("click", () => byId("document-progress-modal").close()); window.addEventListener("popstate", () => { const threadId = new URL(window.location.href).searchParams.get("conversation"); if (threadId) loadConversation(threadId, true).catch(() => { setActiveThread(null, true); clearChat(); }); else { currentThreadId = null; clearChat(); } }); const requested = new URL(window.location.href).searchParams.get("conversation"); loadConversations().then(() => requested && loadConversation(requested, true)).catch(() => {}); loadDocuments().catch(() => {}); }
 function initialiseLogin() { const form = byId("login-form"); if (!form) return; byId("password-toggle").addEventListener("click", () => { const input = byId("password"); const visible = input.type === "text"; input.type = visible ? "password" : "text"; byId("password-toggle").textContent = visible ? "Show" : "Hide"; }); form.addEventListener("submit", () => { const button = form.querySelector("button[type=submit]"); button.disabled = true; button.querySelector(".button-label").textContent = "Signing in…"; }); }
 if (isChatPage()) initialiseChat(); else initialiseLogin();
