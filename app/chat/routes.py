@@ -64,9 +64,12 @@ def enrich_sources_with_images(sources):
         return sources
     document_ids = {key[0] for key in page_keys}
     images = DocumentImage.query.filter(DocumentImage.document_id.in_(document_ids)).all()
+    priority = {"ocr_page": 0, "pdf_page": 1, "embedded": 2}
     by_page = {}
     for image in images:
-        by_page.setdefault((image.document_id, image.page_number), image)
+        key = (image.document_id, image.page_number)
+        if key not in by_page or priority.get(image.source_kind, 99) < priority.get(by_page[key].source_kind, 99):
+            by_page[key] = image
     for source in sources:
         image = by_page.get((source.get("document_id"), source.get("page_number")))
         if image:

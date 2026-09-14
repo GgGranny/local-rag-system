@@ -132,7 +132,7 @@ button:active:not(:disabled) { transform:translateY(1px); }
 .source-content ul,.source-content ol { margin:0 0 12px; padding-left:20px; }
 .source-content li + li { margin-top:4px; }
 .source-ocr-note { display:inline-block; margin:3px 0 0; padding:3px 6px; color:#8a5a00; background:#fff0c4; border-radius:4px; font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:.04em; }
-.source-image { margin:10px 0 22px; }.source-image img { display:block; width:auto; max-width:100%; height:auto; margin:0 auto; }.source-image figcaption { margin-top:6px; color:var(--muted); font-size:11px; text-align:center; }.source-image.is-cited-image img { outline:3px solid #e6aa29; outline-offset:3px; border-radius:4px; }
+.source-image { display:block; width:100%; margin:10px 0 22px; overflow:visible; }.source-image img { display:block; width:100%; max-width:100%; height:auto; margin:0; object-fit:contain; }.source-image figcaption { margin-top:6px; color:var(--muted); font-size:11px; text-align:center; }.source-image.is-cited-image img { outline:3px solid #e6aa29; outline-offset:3px; border-radius:4px; }
 .source-loading,.source-error { margin:18px 2px; padding:15px; color:var(--muted); background:#f8faff; border:1px solid #e1e8f7; border-radius:10px; font-size:13px; }
 .source-error p { margin:0 0 10px; }.source-error button { padding:6px 9px; color:var(--brand); background:#fff; border:1px solid #b9caef; border-radius:7px; font-weight:700; }
 .loading-dot { display:inline-block; width:8px; height:8px; margin-right:7px; background:var(--brand); border-radius:50%; animation:source-pulse 1s ease-in-out infinite; }

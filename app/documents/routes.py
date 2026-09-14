@@ -221,20 +221,39 @@ def get_document_source(document_id):
         .all()
     )
 
+    def image_payload(image):
+        return {
+            "image_id": image.image_id,
+            "page_number": image.page_number,
+            "image_index": image.image_index,
+            "vertical_position": image.vertical_position,
+            "source_kind": image.source_kind,
+            "url": url_for("documents.get_source_image", image_id=image.image_id),
+        }
+
+    # One visual is rendered for a PDF page, regardless of how many text
+    # chunks, OCR detections, or embedded assets belong to it.  Older
+    # ingestions without a saved page render retain their full embedded image
+    # assets as a compatibility fallback.
+    page_visuals = []
+    images_by_page = {}
+    for image in images:
+        images_by_page.setdefault(image.page_number, []).append(image)
+    for page_number, page_images in images_by_page.items():
+        full_page = next(
+            (image for image in page_images if image.source_kind in {"ocr_page", "pdf_page"}),
+            None,
+        )
+        if full_page:
+            page_visuals.append(image_payload(full_page))
+        else:
+            page_visuals.extend(image_payload(image) for image in page_images)
+
     return jsonify({
         "document_id": document.id,
         "filename": document.filename,
-        "images": [
-            {
-                "image_id": image.image_id,
-                "page_number": image.page_number,
-                "image_index": image.image_index,
-                "vertical_position": image.vertical_position,
-                "source_kind": image.source_kind,
-                "url": url_for("documents.get_source_image", image_id=image.image_id),
-            }
-            for image in images
-        ],
+        "images": [image_payload(image) for image in images],
+        "page_visuals": page_visuals,
         "pages": [
             {
                 "page_number": page.page_number,

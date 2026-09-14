@@ -163,15 +163,17 @@ function appendSemanticLine(container, line) {
     element.textContent = line; container.appendChild(element); return element;
 }
 
-function appendSourceImages(container, images, citedImageId) {
+function appendSourceImages(container, images, citedImageId, renderedImageIds = new Set()) {
     images.forEach((image) => {
+        if (renderedImageIds.has(image.image_id)) return;
+        renderedImageIds.add(image.image_id);
         const figure = document.createElement("figure");
         figure.className = "source-image";
         figure.id = `source-image-${image.image_id}`;
         if (image.image_id === citedImageId) figure.classList.add("is-cited-image");
         const element = document.createElement("img");
         element.src = image.url;
-        element.alt = image.source_kind === "ocr_page" ? "OCR source page" : "Source document figure";
+        element.alt = image.source_kind === "ocr_page" ? "Complete OCR source page" : image.source_kind === "pdf_page" ? "Complete PDF source page" : "Complete source document image";
         element.loading = "lazy";
         figure.appendChild(element);
         if (image.source_kind === "ocr_page") { const caption = document.createElement("figcaption"); caption.textContent = "Source page used for OCR"; figure.appendChild(caption); }
@@ -193,27 +195,15 @@ function markCitedText(container, chunkId, chunkContent) {
 }
 
 function renderSourcePage(container, page, images, citedChunk) {
-    // This is a structural section only, never a visual PDF page/card.
+    // A visual is a complete page/image asset, never a text-chunk fragment.
     const pageContent = document.createElement("section");
     pageContent.className = "source-content";
     const lines = sourceLines(page.content);
-    const positionedImages = [...images].sort((a, b) => (a.vertical_position ?? 1) - (b.vertical_position ?? 1));
-    let imageCursor = 0;
+    appendSourceImages(pageContent, images, null);
     lines.forEach((line, index) => {
-        while (
-            imageCursor < positionedImages.length
-            && (positionedImages[imageCursor].vertical_position ?? 1) <= index / Math.max(lines.length, 1)
-        ) {
-            appendSourceImages(pageContent, [positionedImages[imageCursor]], null);
-            imageCursor += 1;
-        }
         appendSemanticLine(pageContent, line);
     });
-    while (imageCursor < positionedImages.length) {
-        appendSourceImages(pageContent, [positionedImages[imageCursor]], null);
-        imageCursor += 1;
-    }
-    if (!lines.length && !positionedImages.length) appendSourceText(pageContent, page.content);
+    if (!lines.length && !images.length) appendSourceText(pageContent, page.content);
     container.appendChild(pageContent);
 
     if (citedChunk) {
@@ -235,7 +225,7 @@ function renderSourceDocument(sourceDocument, citedChunkId, citation, citedImage
     const cited = sourceDocument.chunks.find((chunk) => chunk.chunk_id === citedChunkId);
     byId("source-meta").textContent = `${citation || "Source"}${cited?.page_number ? ` · page ${cited.page_number}` : ""}${cited?.extraction_method ? ` · ${cited.extraction_method}` : ""}`;
     const imagesByPage = new Map();
-    (sourceDocument.images || []).forEach((image) => {
+    (sourceDocument.page_visuals || sourceDocument.images || []).forEach((image) => {
         const pageImages = imagesByPage.get(image.page_number) || [];
         pageImages.push(image); imagesByPage.set(image.page_number, pageImages);
     });
@@ -260,6 +250,7 @@ function renderSourceDocument(sourceDocument, citedChunkId, citation, citedImage
 
     // Documents ingested before page-source preservation retain the legacy
     // chunk fallback; reprocess them to get image placement in reading order.
+    const renderedImageIds = new Set();
     sourceDocument.chunks.forEach((chunk, index) => {
         const block = document.createElement("article");
         block.className = "source-block"; block.id = `source-chunk-${chunk.chunk_id}`;
@@ -270,7 +261,7 @@ function renderSourceDocument(sourceDocument, citedChunkId, citation, citedImage
         list.appendChild(block);
         const nextChunk = sourceDocument.chunks[index + 1];
         if (!nextChunk || nextChunk.page_number !== chunk.page_number) {
-            appendSourceImages(list, imagesByPage.get(chunk.page_number) || [], citedImageId);
+            appendSourceImages(list, imagesByPage.get(chunk.page_number) || [], citedImageId, renderedImageIds);
         }
     });
     const targetId = citedImageId ? `source-image-${citedImageId}` : `source-chunk-${citedChunkId}`;

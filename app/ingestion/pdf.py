@@ -253,6 +253,19 @@ def extract_page_images(pdf, page, page_number: int) -> list[dict]:
     return images
 
 
+def render_full_page_image(page, page_number: int, source_kind: str = "pdf_page") -> dict:
+    """Return one uncropped, complete visual representation of a PDF page."""
+    pixmap = page.get_pixmap(matrix=fitz.Matrix(1.5, 1.5), alpha=False)
+    return {
+        "data": pixmap.tobytes("png"),
+        "extension": "png",
+        "page_number": page_number,
+        "image_index": 0,
+        "vertical_position": 0.0,
+        "source_kind": source_kind,
+    }
+
+
 def extract_pdf_pages(
     file_path: str,
     min_text_length: int = 30
@@ -313,16 +326,7 @@ def extract_pdf_pages(
                     "extraction_method": ocr_result["extraction_method"],
                     # Keep the rendered source page beside OCR text.  The UI
                     # can show it, but must not pretend to pixel-highlight it.
-                    "images": [{
-                        "data": page.get_pixmap(
-                            matrix=fitz.Matrix(1.5, 1.5), alpha=False
-                        ).tobytes("png"),
-                        "extension": "png",
-                        "page_number": page_number,
-                        "image_index": 0,
-                        "vertical_position": 0.0,
-                        "source_kind": "ocr_page",
-                    }],
+                    "images": [render_full_page_image(page, page_number, "ocr_page")],
                 })
 
                 if not ocr_result["text"].strip():
@@ -336,7 +340,11 @@ def extract_pdf_pages(
                     "page_number": page_number,
                     "text": native_text,
                     "extraction_method": "pymupdf",
-                    "images": extract_page_images(pdf, page, page_number),
+                    # The canonical source visual is the full page. Embedded
+                    # assets are retained too, but the viewer prefers this
+                    # stable page identity so it never assembles visual tiles
+                    # from text chunks or image regions.
+                    "images": [render_full_page_image(page, page_number)] + extract_page_images(pdf, page, page_number),
                 })
 
                 logger.info(
